@@ -1,0 +1,225 @@
+import { GoogleGenAI, Modality, GenerateContentResponse, Part } from "@google/genai";
+
+const ARTIST_STYLE_PROMPT = `
+You are an AI artist with a very specific, consistent, and recognizable signature art style.
+Your style MUST adhere to these detailed rules for every single image you create, without exception. This is your artistic identity.
+
+**1. Core Philosophy:**
+- **Inspiration:** A harmonious blend of modern digital illustration, classic Disney character appeal (pre-2000s), and the enchanting, heartfelt atmosphere of Studio Ghibli.
+- **Theme:** Primarily inspired by biblical narratives and imagery, but translated into a fresh, contemporary, and universally approachable visual language.
+- **Aesthetic:** Clean, clear, and focused. The art is heartfelt and approachable, never overly ornate or complex. It prioritizes emotional resonance and clarity of message.
+
+**2. Line Art:**
+- **Color:** Use a dark sepia or a very dark, warm brown for line work. Never use pure black. This gives a softer, more classic feel.
+- **Quality:** Lines should be clean, with subtle variations in weight to suggest form and shadow. The line work should feel organic and hand-drawn, not perfectly uniform or sterile.
+- **Style:** Expressive but controlled. Lines define the characters and key objects clearly.
+
+**3. Coloring and Shading:**
+- **Method:** Employ a soft, textured coloring style that resembles digital watercolor or colored pencil. Avoid flat, vector-like colors. There should be a subtle, visible texture in the colored areas.
+- **Shading:** Use soft-cel shading. Shadows are not harsh or sharp-edged but have a gentle gradient, suggesting soft, diffused light. The shadows should use cooler, slightly desaturated versions of the base color.
+- **Palette:** A vibrant but harmonious color palette. Think Ghibli's lush nature colors (deep greens, earthy browns, sky blues) mixed with the bright, clear character colors of classic Disney. The overall palette should feel warm and inviting.
+
+**4. Lighting:**
+- **Source:** The primary light source is typically soft and diffused, as if from an overcast sky or a gentle morning sun. This creates soft shadows and avoids harsh contrasts.
+- **Highlights:** Use warm, creamy highlights sparingly to indicate the main light source and add a touch of magic or focus.
+
+**5. Character Design:**
+- **Features:** Characters are appealing and highly expressive. Eyes are large and emotive, conveying a wide range of feeling. Facial features are softly rounded. Proportions are slightly stylized for charm, but remain believable.
+- **Emotion:** The primary goal of character design is to convey emotion and relatability. Poses and expressions should be clear and heartfelt.
+
+**6. Backgrounds and Environments:**
+- **Style:** Backgrounds are painterly and slightly impressionistic, often using a softer focus than the main characters. This ensures the characters remain the focal point.
+- **Detail:** Environments should be beautiful and atmospheric but not cluttered. They support the narrative without overwhelming it. Think of Ghibli's beautiful, evocative landscapes.
+
+**7. Final Composition & Texture:**
+- **Focus:** Every composition must have a clear focal point. The viewer's eye should be immediately drawn to the most important part of the image.
+- **Overall Texture:** Apply a very subtle, uniform paper or canvas texture over the entire final image. This unifies the piece and enhances the hand-crafted feel.
+
+You are to generate images that are instantly recognizable as your work. Adhere to these principles as your unbreakable artistic code.
+`;
+
+const STYLE_PROMPTS: { [key: string]: string } = {
+  '클래식': '', // Base style is already defined in ARTIST_STYLE_PROMPT
+  '모노크롬 잉크': `
+**스타일 변형: 모노크롬 잉크**
+- **색상 팔레트:** 엄격한 흑백. 어두운 세피아, 따뜻한 회색, 크림색 음영을 배경에 사용하세요. 다른 색상은 허용되지 않습니다.
+- **기법:** 라인 아트를 강조하세요. 복잡한 잉크 드로잉이나 목판화처럼 느껴지게 만드세요. 부드러운 그라데이션 대신 크로스 해칭과 점묘법을 사용하여 음영을 표현하세요. 전반적인 분위기는 더 극적이고 강렬해야 합니다.`,
+  '파스텔 수채화': `
+**스타일 변형: 파스텔 수채화**
+- **색상 팔레트:** 밝은 파스텔 색상 팔레트로 전환하세요. 부드러운 분홍색, 베이비 블루, 민트 그린, 라벤더를 사용하세요. 색상은 밝고, 가볍고, 반투명해야 합니다.
+- **기법:** 채색은 옅은 수채화 물감처럼 보여야 합니다. 가장자리는 부드러워야 하며 색상이 서로 약간 번질 수 있습니다. 라인 아트는 더 얇고 부드러운 색상을 보완하기 위해 더 밝은 갈색 음영일 수 있습니다. 분위기는 꿈꾸는 듯하고, 부드럽고, 기발해야 합니다.`,
+  '우키요에': `
+**스타일 변형: 우키요에**
+- **미학:** 일본 우키요에 목판화 스타일을 모방하세요. 강렬하고 검은 윤곽선, 평면적인 색상 영역, 제한된 전통적인 색상 팔레트를 사용하세요.
+- **기법:** 구성은 비대칭적이고 역동적이어야 하며, 종종 자연, 역사 또는 일상 생활의 모티프를 특징으로 합니다. 질감은 수제 종이와 비슷해야 합니다. 분위기는 양식화되고 극적이어야 합니다.`,
+  '아르누보': `
+**스타일 변형: 아르누보**
+- **미학:** 아르누보 미학을 채택하세요. 길고 구불구불한 유기적인 선과 곡선이 특징입니다. 구성은 매우 장식적이고 화려해야 하며, 종종 꽃이나 식물과 같은 모티프가 디자인에 통합됩니다.
+- **기법:** 색상 팔레트는 조화로워야 하며 종종 금색 또는 은색 악센트가 있는 차분한 톤을 포함합니다. 전반적인 느낌은 우아하고 흐르는 듯해야 합니다.`,
+  '사이버펑크 글리치': `
+**스타일 변형: 사이버펑크 글리치**
+- **미학:** 사이버펑크 글리치 스타일로 이미지를 만드세요. 생생한 네온 조명(특히 분홍색, 파란색, 보라색)이 있는 어둡고 미래적인 배경을 사용하세요.
+- **기법:** 픽셀화, 스캔 라인, 색수차, 글리치 효과와 같은 디지털 아티팩트를 통합하세요. 캐릭터는 사이버네틱 강화 기능을 가질 수 있습니다. 분위기는 거칠고, 첨단 기술이며, 디스토피아적이어야 합니다.`
+};
+
+const QUALITY_PROMPTS: { [key: string]: string } = {
+  'Standard': '',
+  'High': 'Create the image with intricate details, ultra-high resolution, and masterpiece quality. Pay close attention to textures, lighting, and subtle nuances to make it look stunning and professional.',
+};
+
+
+const getAiClient = () => {
+    if (!process.env.API_KEY) {
+        throw new Error("API_KEY environment variable not set.");
+    }
+    return new GoogleGenAI({ apiKey: process.env.API_KEY });
+};
+
+export const generateArt = async (
+  userPrompt: string,
+  baseImages: { mimeType: string; data: string }[],
+  referenceImages: { mimeType: string; data: string }[],
+  onStatusUpdate: (message: string) => void,
+  artStyle: string,
+  numOutputs: number,
+  quality: string,
+  negativePrompt: string
+): Promise<string[]> => {
+  const ai = getAiClient();
+  
+  try {
+    let finalPromptText: string;
+    const finalArtistPrompt = ARTIST_STYLE_PROMPT + (STYLE_PROMPTS[artStyle] || '');
+    const qualityInstruction = QUALITY_PROMPTS[quality] || '';
+    let finalPromptParts: Part[] = [];
+
+    // Case 1: Base images are provided for direct modification/remake.
+    if (baseImages.length > 0) {
+      if (referenceImages.length > 0) {
+        onStatusUpdate("이미지들을 조합하여 그림을 그리는 중...");
+        finalPromptText = `${finalArtistPrompt}\n\n**Task:** Redraw the **base image(s)** (the first image(s) provided) by incorporating the style, mood, and elements from the **reference images** (all subsequent images).\n\n**User's Instructions:** "${userPrompt || 'Combine them creatively.'}"\n\n**Quality Instructions:** ${qualityInstruction}`;
+        finalPromptParts.push({ text: finalPromptText });
+        baseImages.forEach(img => finalPromptParts.push({ inlineData: img }));
+        referenceImages.forEach(img => finalPromptParts.push({ inlineData: img }));
+      } else {
+        onStatusUpdate("이미지를 기반으로 그림을 그리는 중...");
+        finalPromptText = `${finalArtistPrompt}\n\n**Task:** Redraw the provided image(s) from scratch in your signature style.\n\n**User's Instructions:** "${userPrompt || 'Recreate it faithfully in your style.'}"\n\n**Quality Instructions:** ${qualityInstruction}`;
+        finalPromptParts.push({ text: finalPromptText });
+        baseImages.forEach(img => finalPromptParts.push({ inlineData: img }));
+      }
+      
+      if (negativePrompt && negativePrompt.trim()) {
+        const negativePromptText = `\n\n**Negative Prompt (Crucial Exclusion):** Under no circumstances should the final image contain any of the following elements or concepts: "${negativePrompt.trim()}". The artist must strictly avoid these.`;
+        (finalPromptParts[0] as { text: string }).text += negativePromptText;
+      }
+    // Case 2: No base images, but reference images are provided for inspiration.
+    } else if (referenceImages.length > 0) {
+      onStatusUpdate("이미지를 분석하는 중...");
+      
+      const analysisPromptText = `당신은 미술 분석 전문가입니다. 제공된 이미지를 깊이 있고 다층적으로 분석하세요. 이미지의 핵심 본질을 파악하기 위해 재귀적으로 해체해야 합니다.
+1. **감정의 핵과 서사:** 이미지가 전달하려는 핵심적인 감정이나 이야기는 무엇입니까? 인물의 표정, 몸짓, 그리고 주변 환경과의 상호작용을 분석하여 서사를 파악하세요. 중심 주제는 무엇인가요?
+2. **분위기와 무드:** 전체적인 분위기(예: 우울함, 기쁨, 긴장감, 평온함)를 묘사하세요. 이러한 무드는 어떻게 만들어지고 있나요?
+3. **색채와 빛 분석:** 사용된 색상 팔레트를 분석하세요. 주조색은 무엇이며, 이 색들이 주는 심리적 효과는 무엇입니까? 빛의 사용(예: 부드러운, 거친, 극적인 조명)이 분위기와 초점을 만드는 데 어떻게 기여하고 있나요?
+4. **구도와 역동성:** 구성을 세밀하게 분석하세요. 초점은 어디에 있습니까? 선, 형태, 균형이 감상자의 시선을 어떻게 유도하며 이미지의 에너지에 기여하나요?
+5. **종합:** 위의 모든 분석을 종합하여, 이미지를 완벽하게 설명하는 글을 작성하세요. 이 설명은 단순히 이미지에 '무엇이 있는지'를 넘어, 감정적이고 주제적인 차원에서 '무엇을 표현하려 하는지'를 포착해야 합니다. 이 분석은 다른 아티스트가 이미지의 형태뿐만 아니라 그 영혼까지 재창조하는 데 사용될 것입니다.`;
+
+      const analysisPromptParts: Part[] = [
+        ...referenceImages.map(image => ({ inlineData: image })),
+        { text: analysisPromptText }
+      ];
+      
+      const analysisResponse = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: { parts: analysisPromptParts },
+      });
+
+      const imageDescription = analysisResponse.text;
+      
+      if (!imageDescription) {
+          throw new Error("이미지를 분석하지 못했습니다.");
+      }
+      
+      onStatusUpdate("분석을 기반으로 그림을 그리는 중...");
+
+      finalPromptText = `${finalArtistPrompt}\n\n**Based on the following analysis of a reference image, create a new illustration from scratch in your signature style:**\n"${imageDescription}"\n\n**Incorporate the user's specific instructions:** "${userPrompt || 'Create an image based on the analysis.'}"\n\n**Quality Instructions:** ${qualityInstruction}`;
+      
+      if (negativePrompt && negativePrompt.trim()) {
+        finalPromptText += `\n\n**Negative Prompt (Crucial Exclusion):** Under no circumstances should the final image contain any of the following elements or concepts: "${negativePrompt.trim()}". The artist must strictly avoid these.`;
+      }
+      
+      finalPromptParts.push({ text: finalPromptText });
+
+    // Case 3: Text prompt only.
+    } else {
+        onStatusUpdate("프롬프트를 기반으로 그림을 그리는 중...");
+        finalPromptText = `${finalArtistPrompt}\n\n**User's Request:** "${userPrompt}"\n\n**Quality Instructions:** ${qualityInstruction}`;
+        
+        if (negativePrompt && negativePrompt.trim()) {
+          finalPromptText += `\n\n**Negative Prompt (Crucial Exclusion):** Under no circumstances should the final image contain any of the following elements or concepts: "${negativePrompt.trim()}". The artist must strictly avoid these.`;
+        }
+
+        finalPromptParts.push({ text: finalPromptText });
+    }
+  
+    const generationPromises = Array.from({ length: numOutputs }).map((_, i) => {
+        if (numOutputs > 1) {
+            onStatusUpdate(`${numOutputs}개 중 ${i + 1}번째 이미지 생성 중...`);
+        }
+        return ai.models.generateContent({
+          model: 'gemini-2.5-flash-image',
+          contents: {
+            parts: finalPromptParts,
+          },
+          config: {
+            responseModalities: [Modality.IMAGE],
+          },
+        });
+    });
+
+    const responses = await Promise.all(generationPromises);
+    
+    const results = responses.map(response => {
+        const candidate = response.candidates?.[0];
+
+        // First, check if the request was blocked or if there are no candidates.
+        if (!candidate) {
+            const blockReason = response.promptFeedback?.blockReason;
+            if (blockReason) {
+                throw new Error(`요청이 차단되었습니다 (${blockReason}). 프롬프트를 수정해 보세요.`);
+            }
+            throw new Error("API에서 응답 후보를 받지 못했습니다. 요청이 차단되었을 수 있습니다.");
+        }
+
+        // Check for non-STOP finish reasons like safety.
+        if (candidate.finishReason && candidate.finishReason !== 'STOP') {
+            throw new Error(`생성이 중단되었습니다. 이유: ${candidate.finishReason}. 콘텐츠 안전 문제일 수 있습니다.`);
+        }
+
+        // Find the part that contains the image data. The model might return multiple parts.
+        const imagePart = candidate.content?.parts?.find(p => p.inlineData);
+
+        if (imagePart?.inlineData?.data) {
+            return imagePart.inlineData.data;
+        }
+
+        // If no image is found, provide a more specific error for debugging.
+        console.error("Failed to find image data in response:", JSON.stringify(response, null, 2));
+        
+        const textPart = candidate.content?.parts?.find(p => 'text' in p);
+        if (textPart && 'text' in textPart && typeof textPart.text === 'string' && textPart.text.trim()) {
+            throw new Error(`API가 이미지 대신 텍스트를 반환했습니다. 모델이 요청을 이해하지 못했을 수 있습니다.`);
+        }
+        
+        throw new Error("API에서 이미지 데이터를 받지 못했습니다. 예상치 못한 응답 형식입니다.");
+    });
+    
+    return results;
+
+  } catch (error) {
+    console.error("Error generating art:", error);
+     if (error instanceof Error) {
+        throw new Error(`아트를 생성하지 못했습니다: ${error.message}`);
+    }
+    throw new Error("아트를 생성하지 못했습니다. 다시 시도해주세요.");
+  }
+};
