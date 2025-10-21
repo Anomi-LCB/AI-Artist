@@ -6,34 +6,10 @@ import { SparklesIcon } from './components/icons/SparklesIcon';
 import { generateArt } from './services/geminiService';
 import { fileToBase64, base64ToFile } from './utils/fileUtils';
 import { Workspace } from './components/Workspace';
-
-const inspirationalPrompts = [
-  "별빛 아래에서 책을 읽는 어린 왕자",
-  "미래 도시의 골목길을 탐험하는 고양이",
-  "숲 속 오두막의 벽난로 앞",
-  "구름 위를 항해하는 비행선",
-  "마법의 숲에서 길을 잃은 기사",
-  "밤하늘의 은하수를 그리는 여우",
-  "수정 동굴 속에서 빛나는 꽃",
-  "고대 유적을 지키는 기계 골렘",
-  "시간을 여행하는 낡은 기차",
-  "바다 깊은 곳의 숨겨진 도시",
-];
-
-const artStyleOptions = [
-  { id: '클래식', label: '클래식' },
-  { id: '모노크롬 잉크', label: '모노크롬 잉크' },
-  { id: '파스텔 수채화', label: '파스텔 수채화' },
-  { id: '우키요에', label: '우키요에' },
-  { id: '아르누보', label: '아르누보' },
-  { id: '사이버펑크 글리치', label: '사이버펑크' },
-];
-
-const qualityOptions = [
-  { id: 'Standard', label: '표준' },
-  { id: 'High', label: '고품질' },
-];
-
+import { StyleSelector } from './components/StyleSelector';
+import { ArtStyleId, QualityId, WorkspaceCreation } from './types';
+import { artStyleOptions, qualityOptions, inspirationalPrompts } from './constants';
+import { getAllCreations, addCreation, deleteCreation } from './lib/db';
 
 const App: React.FC = () => {
   const [prompt, setPrompt] = useState<string>('');
@@ -41,8 +17,8 @@ const App: React.FC = () => {
   const [baseImageFiles, setBaseImageFiles] = useState<File[]>([]);
   const [referenceImageFiles, setReferenceImageFiles] = useState<File[]>([]);
   
-  const [artStyle, setArtStyle] = useState<string>(artStyleOptions[0].id);
-  const [quality, setQuality] = useState<string>(qualityOptions[0].id);
+  const [artStyle, setArtStyle] = useState<ArtStyleId>(artStyleOptions[0].id);
+  const [quality, setQuality] = useState<QualityId>(qualityOptions[0].id);
   const [numOutputs, setNumOutputs] = useState<number>(1);
 
   const [generatedImages, setGeneratedImages] = useState<string[]>([]);
@@ -50,28 +26,21 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [loadingMessage, setLoadingMessage] = useState<string>('');
 
-  const [savedCreations, setSavedCreations] = useState<string[]>([]);
+  const [savedCreations, setSavedCreations] = useState<WorkspaceCreation[]>([]);
 
-  // Load from localStorage on initial mount
+  // Load from IndexedDB on initial mount
   useEffect(() => {
-    try {
-      const storedCreations = localStorage.getItem('ai-artist-workspace');
-      if (storedCreations) {
-        setSavedCreations(JSON.parse(storedCreations));
+    const loadCreations = async () => {
+      try {
+        const creations = await getAllCreations();
+        setSavedCreations(creations);
+      } catch (err) {
+        console.error("Failed to load creations from IndexedDB", err);
+        setError("워크스페이스를 불러오는 데 실패했습니다.");
       }
-    } catch (error) {
-      console.error("Failed to load creations from localStorage", error);
-    }
+    };
+    loadCreations();
   }, []);
-
-  // Save to localStorage whenever creations change
-  useEffect(() => {
-    try {
-      localStorage.setItem('ai-artist-workspace', JSON.stringify(savedCreations));
-    } catch (error) {
-      console.error("Failed to save creations to localStorage", error);
-    }
-  }, [savedCreations]);
 
 
   const handleInspireMe = useCallback(() => {
@@ -116,14 +85,27 @@ const App: React.FC = () => {
     }
   }, [prompt, baseImageFiles, referenceImageFiles, artStyle, numOutputs, quality, negativePrompt]);
 
-  const handleSaveCreation = useCallback((imageToSave: string) => {
-    if (imageToSave && !savedCreations.includes(imageToSave)) {
-      setSavedCreations(prev => [imageToSave, ...prev]);
+  const handleSaveCreation = useCallback(async (imageToSave: string) => {
+    if (imageToSave && !savedCreations.some(c => c.base64 === imageToSave)) {
+      try {
+        await addCreation(imageToSave);
+        const updatedCreations = await getAllCreations(); // Re-fetch to get the new item with its ID
+        setSavedCreations(updatedCreations);
+      } catch (err) {
+        console.error("Failed to save creation to IndexedDB", err);
+        setError("워크스페이스에 저장하지 못했습니다.");
+      }
     }
   }, [savedCreations]);
 
-  const handleDeleteCreation = useCallback((indexToDelete: number) => {
-    setSavedCreations(prev => prev.filter((_, index) => index !== indexToDelete));
+  const handleDeleteCreation = useCallback(async (idToDelete: number) => {
+    try {
+      await deleteCreation(idToDelete);
+      setSavedCreations(prev => prev.filter(creation => creation.id !== idToDelete));
+    } catch (err) {
+      console.error("Failed to delete creation from IndexedDB", err);
+      setError("워크스페이스에서 삭제하지 못했습니다.");
+    }
   }, []);
 
   const handleSelectForEditing = useCallback(async (base64: string) => {
@@ -152,18 +134,12 @@ const App: React.FC = () => {
             
             <div className="flex flex-col gap-6 flex-grow">
               
-              <div>
-                <label className="block text-lg font-semibold mb-2 text-teal-300">아트 스타일</label>
-                <div className="flex flex-wrap gap-2">
-                  {artStyleOptions.map(option => (
-                    <button key={option.id} onClick={() => setArtStyle(option.id)} disabled={isLoading}
-                      className={`px-3 py-1.5 text-sm font-semibold rounded-md transition-colors duration-200 ${artStyle === option.id ? 'bg-purple-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600 disabled:opacity-50'}`}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <StyleSelector
+                styles={artStyleOptions}
+                selectedStyle={artStyle}
+                onSelect={setArtStyle}
+                disabled={isLoading}
+              />
               
               <div>
                 <label htmlFor="prompt" className="block text-lg font-semibold mb-2 text-teal-300">

@@ -1,4 +1,5 @@
 import { GoogleGenAI, Modality, GenerateContentResponse, Part } from "@google/genai";
+import { ArtStyleId, QualityId } from "../types";
 
 const ARTIST_STYLE_PROMPT = `
 You are an AI artist with a very specific, consistent, and recognizable signature art style.
@@ -38,7 +39,7 @@ Your style MUST adhere to these detailed rules for every single image you create
 You are to generate images that are instantly recognizable as your work. Adhere to these principles as your unbreakable artistic code.
 `;
 
-const STYLE_PROMPTS: { [key: string]: string } = {
+const STYLE_PROMPTS: { [key in ArtStyleId]: string } = {
   '클래식': '', // Base style is already defined in ARTIST_STYLE_PROMPT
   '모노크롬 잉크': `
 **스타일 변형: 모노크롬 잉크**
@@ -62,7 +63,7 @@ const STYLE_PROMPTS: { [key: string]: string } = {
 - **기법:** 픽셀화, 스캔 라인, 색수차, 글리치 효과와 같은 디지털 아티팩트를 통합하세요. 캐릭터는 사이버네틱 강화 기능을 가질 수 있습니다. 분위기는 거칠고, 첨단 기술이며, 디스토피아적이어야 합니다.`
 };
 
-const QUALITY_PROMPTS: { [key: string]: string } = {
+const QUALITY_PROMPTS: { [key in QualityId]: string } = {
   'Standard': '',
   'High': 'Create the image with intricate details, ultra-high resolution, and masterpiece quality. Pay close attention to textures, lighting, and subtle nuances to make it look stunning and professional.',
 };
@@ -80,9 +81,9 @@ export const generateArt = async (
   baseImages: { mimeType: string; data: string }[],
   referenceImages: { mimeType: string; data: string }[],
   onStatusUpdate: (message: string) => void,
-  artStyle: string,
+  artStyle: ArtStyleId,
   numOutputs: number,
-  quality: string,
+  quality: QualityId,
   negativePrompt: string
 ): Promise<string[]> => {
   const ai = getAiClient();
@@ -161,57 +162,47 @@ export const generateArt = async (
         finalPromptParts.push({ text: finalPromptText });
     }
   
-    const generationPromises = Array.from({ length: numOutputs }).map((_, i) => {
-        if (numOutputs > 1) {
-            onStatusUpdate(`${numOutputs}개 중 ${i + 1}번째 이미지 생성 중...`);
-        }
-        return ai.models.generateContent({
-          model: 'gemini-2.5-flash-image',
-          contents: {
-            parts: finalPromptParts,
-          },
-          config: {
-            responseModalities: [Modality.IMAGE],
-          },
-        });
-    });
-
-    const responses = await Promise.all(generationPromises);
+    onStatusUpdate(numOutputs > 1 ? `${numOutputs}개의 이미지를 생성하는 중...` : '이미지 생성 중...');
     
-    const results = responses.map(response => {
-        const candidate = response.candidates?.[0];
-
-        // First, check if the request was blocked or if there are no candidates.
-        if (!candidate) {
-            const blockReason = response.promptFeedback?.blockReason;
-            if (blockReason) {
-                throw new Error(`요청이 차단되었습니다 (${blockReason}). 프롬프트를 수정해 보세요.`);
-            }
-            throw new Error("API에서 응답 후보를 받지 못했습니다. 요청이 차단되었을 수 있습니다.");
-        }
-
-        // Check for non-STOP finish reasons like safety.
-        if (candidate.finishReason && candidate.finishReason !== 'STOP') {
-            throw new Error(`생성이 중단되었습니다. 이유: ${candidate.finishReason}. 콘텐츠 안전 문제일 수 있습니다.`);
-        }
-
-        // Find the part that contains the image data. The model might return multiple parts.
-        const imagePart = candidate.content?.parts?.find(p => p.inlineData);
-
-        if (imagePart?.inlineData?.data) {
-            return imagePart.inlineData.data;
-        }
-
-        // If no image is found, provide a more specific error for debugging.
-        console.error("Failed to find image data in response:", JSON.stringify(response, null, 2));
-        
-        const textPart = candidate.content?.parts?.find(p => 'text' in p);
-        if (textPart && 'text' in textPart && typeof textPart.text === 'string' && textPart.text.trim()) {
-            throw new Error(`API가 이미지 대신 텍스트를 반환했습니다. 모델이 요청을 이해하지 못했을 수 있습니다.`);
-        }
-        
-        throw new Error("API에서 이미지 데이터를 받지 못했습니다. 예상치 못한 응답 형식입니다.");
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash-image',
+      contents: {
+        parts: finalPromptParts,
+      },
+      config: {
+        responseModalities: [Modality.IMAGE],
+        candidateCount: numOutputs,
+      },
     });
+    
+    if (!response.candidates || response.candidates.length === 0) {
+        const blockReason = response.promptFeedback?.blockReason;
+        if (blockReason) {
+            throw new Error(`요청이 차단되었습니다 (${blockReason}). 프롬프트를 수정해 보세요.`);
+        }
+        throw new Error("API에서 응답 후보를 받지 못했습니다. 요청이 차단되었을 수 있습니다.");
+    }
+    
+    const results = response.candidates
+      .map(candidate => {
+        if (candidate.finishReason && candidate.finishReason !== 'STOP') {
+          console.warn(`후보 생성이 중단되었습니다: ${candidate.finishReason}`);
+          return null;
+        }
+        
+        const imagePart = candidate.content?.parts?.find(p => p.inlineData);
+        if (imagePart?.inlineData?.data) {
+          return imagePart.inlineData.data;
+        }
+        
+        console.error("후보에서 이미지 데이터를 찾지 못했습니다:", JSON.stringify(candidate, null, 2));
+        return null;
+      })
+      .filter((data): data is string => data !== null);
+
+    if (results.length === 0) {
+      throw new Error("API에서 유효한 이미지를 받지 못했습니다. 모든 생성이 실패했거나 예상치 못한 응답 형식이 반환되었습니다.");
+    }
     
     return results;
 

@@ -1,15 +1,11 @@
 import React from 'react';
 import { StyleCard } from './StyleCard';
-
-interface StyleOption {
-  id: string;
-  label: string;
-}
+import { ArtStyleId, ArtStyleOption } from '../types';
 
 interface StyleSelectorProps {
-  styles: StyleOption[];
-  selectedStyle: string;
-  onSelect: (id: string) => void;
+  styles: ArtStyleOption[];
+  selectedStyle: ArtStyleId;
+  onSelect: (id: ArtStyleId) => void;
   disabled: boolean;
 }
 
