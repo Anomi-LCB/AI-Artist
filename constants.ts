@@ -1,5 +1,5 @@
 
-import { ArtStyleOption, QualityOption } from './types';
+import { ArtStyleOption, QualityOption, ImageAspectRatioOption } from './types';
 
 export const inspirationalPrompts: string[] = [
   "별빛 아래에서 책을 읽는 어린 왕자",
@@ -26,4 +26,10 @@ export const artStyleOptions: ArtStyleOption[] = [
 export const qualityOptions: QualityOption[] = [
   { id: 'Standard', label: '표준' },
   { id: 'High', label: '고품질' },
+];
+
+export const imageAspectRatioOptions: ImageAspectRatioOption[] = [
+  { id: '1:1', label: '1:1\n(정방형)' },
+  { id: '16:9', label: '16:9\n(가로)' },
+  { id: '9:16', label: '9:16\n(세로)' },
 ];

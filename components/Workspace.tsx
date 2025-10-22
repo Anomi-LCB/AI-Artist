@@ -6,12 +6,13 @@ import { TrashIcon } from './icons/TrashIcon';
 import { WorkspaceCreation } from '../types';
 
 interface WorkspaceProps {
+  userName: string;
   creations: WorkspaceCreation[];
   onSelectForEditing: (base64: string) => void;
   onDelete: (id: number) => void;
 }
 
-export const Workspace: React.FC<WorkspaceProps> = ({ creations, onSelectForEditing, onDelete }) => {
+export const Workspace: React.FC<WorkspaceProps> = ({ userName, creations, onSelectForEditing, onDelete }) => {
   const [copiedId, setCopiedId] = useState<number | null>(null);
 
   if (creations.length === 0) {
@@ -56,7 +57,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({ creations, onSelectForEdit
 
   return (
     <div className="w-full max-w-6xl mt-8 p-6 bg-gray-800/50 border border-gray-700 rounded-2xl shadow-lg">
-      <h2 className="text-2xl font-bold mb-4 text-teal-300">내 워크스페이스</h2>
+      <h2 className="text-2xl font-bold mb-4 text-teal-300">{userName}님의 워크스페이스</h2>
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
         {creations.map((creation) => (
           <div key={creation.id} className="relative group aspect-square">

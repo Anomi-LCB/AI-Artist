@@ -1,7 +1,8 @@
 
+
 import React, { useState, useEffect } from 'react';
-import { AppSettings, ArtStyleId, QualityId } from '../types';
-import { artStyleOptions, qualityOptions } from '../constants';
+import { AppSettings, ArtStyleId, QualityId, ImageAspectRatio } from '../types';
+import { artStyleOptions, qualityOptions, imageAspectRatioOptions } from '../constants';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -62,31 +63,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
         
         <div className="space-y-6 overflow-y-auto pr-2 -mr-2">
           <div>
-            <label htmlFor="api-key" className="block text-lg font-semibold mb-2 text-gray-200">
-              Google Gemini API 키
-            </label>
-            <input
-              id="api-key"
-              type="password"
-              value={localSettings.apiKey}
-              onChange={(e) => handleInputChange('apiKey', e.target.value)}
-              placeholder="API 키를 여기에 붙여넣으세요"
-              className="w-full p-3 bg-gray-900 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition"
-            />
-            <p className="text-sm text-gray-400 mt-2">
-              API 키는 브라우저에 로컬로 저장됩니다. 
-              <a 
-                href="https://aistudio.google.com/app/apikey" 
-                target="_blank" 
-                rel="noopener noreferrer"
-                className="text-purple-400 hover:underline ml-1"
-              >
-                여기서 키를 발급받으세요.
-              </a>
-            </p>
-          </div>
-          
-          <div className="border-t border-gray-700 pt-6">
              <h3 className="text-lg font-semibold text-gray-200 mb-4">기본 생성 설정</h3>
              <div className="space-y-4">
                 <div>
@@ -109,6 +85,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                         className="w-full p-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-1 focus:ring-purple-500 transition"
                     >
                         {qualityOptions.map(opt => <option key={opt.id} value={opt.id}>{opt.label}</option>)}
+                    </select>
+                </div>
+                <div>
+                    <label htmlFor="default-image-aspect-ratio" className="block text-sm font-medium text-gray-300 mb-1">기본 이미지 규격</label>
+                    <select
+                        id="default-image-aspect-ratio"
+                        value={localSettings.defaultImageAspectRatio || '1:1'}
+                        onChange={(e) => handleInputChange('defaultImageAspectRatio', e.target.value as ImageAspectRatio)}
+                        className="w-full p-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-1 focus:ring-purple-500 transition"
+                    >
+                        {imageAspectRatioOptions.map(opt => <option key={opt.id} value={opt.id}>{opt.label.replace('\n', ' ')}</option>)}
                     </select>
                 </div>
                  <div>

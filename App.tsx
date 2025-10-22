@@ -1,4 +1,3 @@
-
 import React, { useState, useCallback, useEffect } from 'react';
 import { Header } from './components/Header';
 import { ImageInput } from './components/ImageInput';
@@ -12,22 +11,27 @@ import { fileToBase64, base64ToFile } from './utils/fileUtils';
 import { Workspace } from './components/Workspace';
 import { StyleSelector } from './components/StyleSelector';
 import { SettingsModal } from './components/SettingsModal';
-import { ArtStyleId, QualityId, WorkspaceCreation, AspectRatio, Resolution, AppSettings } from './types';
-import { artStyleOptions, qualityOptions, inspirationalPrompts } from './constants';
+import { ArtStyleId, QualityId, WorkspaceCreation, AspectRatio, Resolution, AppSettings, ImageAspectRatio } from './types';
+import { artStyleOptions, qualityOptions, inspirationalPrompts, imageAspectRatioOptions } from './constants';
 import { getAllCreations, addCreation, deleteCreation, clearAllCreations } from './lib/db';
+import { LoginPage } from './components/LoginPage';
+import { GettingStartedPage } from './components/GettingStartedPage';
 
 type Mode = 'image' | 'video';
 
 const SETTINGS_STORAGE_KEY = 'gemini-artist-settings';
 
 const DEFAULT_SETTINGS: AppSettings = {
-  apiKey: '',
   defaultArtStyle: artStyleOptions[0].id,
   defaultQuality: qualityOptions[0].id,
   defaultNumOutputs: 1,
+  defaultImageAspectRatio: '1:1',
 };
 
 const App: React.FC = () => {
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [userName, setUserName] = useState<string>('');
+  const [hasStarted, setHasStarted] = useState<boolean>(false);
   const [mode, setMode] = useState<Mode>('image');
   
   // Shared state
@@ -44,6 +48,7 @@ const App: React.FC = () => {
   const [referenceImageFiles, setReferenceImageFiles] = useState<File[]>([]);
   const [artStyle, setArtStyle] = useState<ArtStyleId>(DEFAULT_SETTINGS.defaultArtStyle);
   const [quality, setQuality] = useState<QualityId>(DEFAULT_SETTINGS.defaultQuality);
+  const [imageAspectRatio, setImageAspectRatio] = useState<ImageAspectRatio>(DEFAULT_SETTINGS.defaultImageAspectRatio);
   const [numOutputs, setNumOutputs] = useState<number>(DEFAULT_SETTINGS.defaultNumOutputs);
   const [generatedImages, setGeneratedImages] = useState<string[]>([]);
   const [savedCreations, setSavedCreations] = useState<WorkspaceCreation[]>([]);
@@ -57,9 +62,24 @@ const App: React.FC = () => {
   const [generatedVideoUrl, setGeneratedVideoUrl] = useState<string | null>(null);
   const [videoAspectRatio, setVideoAspectRatio] = useState<AspectRatio>('16:9');
   const [videoResolution, setVideoResolution] = useState<Resolution>('1080p');
+  const [isVeoKeyReady, setIsVeoKeyReady] = useState(false);
 
   const allVideoImageFiles = [...backgroundImageFile, ...characterImageFile, ...otherImageFile];
   const isMultiImageMode = allVideoImageFiles.length > 1;
+
+  // Check for session on mount
+  useEffect(() => {
+    const loggedIn = sessionStorage.getItem('isAuthenticated');
+    const name = localStorage.getItem('userName');
+    if (loggedIn === 'true' && name) {
+      setIsAuthenticated(true);
+      setUserName(name);
+    }
+    const started = sessionStorage.getItem('hasStarted');
+    if (started === 'true') {
+      setHasStarted(true);
+    }
+  }, []);
 
   useEffect(() => {
     if (isMultiImageMode) {
@@ -67,9 +87,26 @@ const App: React.FC = () => {
       setVideoResolution('720p');
     }
   }, [isMultiImageMode]);
+  
+  useEffect(() => {
+    const checkVeoKey = async () => {
+      if (mode === 'video' && isAuthenticated) {
+        // @ts-ignore - aistudio is available in the execution environment
+        if (window.aistudio && await window.aistudio.hasSelectedApiKey()) {
+          setIsVeoKeyReady(true);
+        } else {
+          setIsVeoKeyReady(false);
+        }
+      }
+    };
+    checkVeoKey();
+  }, [mode, isAuthenticated]);
+
 
   // Load from storage on initial mount
   useEffect(() => {
+    if (!isAuthenticated) return;
+
     const loadData = async () => {
       // Load Settings
       try {
@@ -81,6 +118,7 @@ const App: React.FC = () => {
           setArtStyle(savedSettings.defaultArtStyle);
           setQuality(savedSettings.defaultQuality);
           setNumOutputs(savedSettings.defaultNumOutputs);
+          setImageAspectRatio(savedSettings.defaultImageAspectRatio || DEFAULT_SETTINGS.defaultImageAspectRatio);
         }
       } catch (err) {
         console.error("Failed to load settings from LocalStorage", err);
@@ -98,7 +136,7 @@ const App: React.FC = () => {
       }
     };
     loadData();
-  }, []);
+  }, [isAuthenticated]);
   
   const handleSaveSettings = (newSettings: AppSettings) => {
     setAppSettings(newSettings);
@@ -106,6 +144,7 @@ const App: React.FC = () => {
     setArtStyle(newSettings.defaultArtStyle);
     setQuality(newSettings.defaultQuality);
     setNumOutputs(newSettings.defaultNumOutputs);
+    setImageAspectRatio(newSettings.defaultImageAspectRatio);
     localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(newSettings));
   };
 
@@ -120,6 +159,26 @@ const App: React.FC = () => {
     }
   };
 
+  const handleLoginSuccess = (name: string) => {
+    sessionStorage.setItem('isAuthenticated', 'true');
+    localStorage.setItem('userName', name);
+    setIsAuthenticated(true);
+    setUserName(name);
+  };
+
+  const handleLogout = () => {
+    sessionStorage.clear();
+    localStorage.removeItem('userName');
+    setIsAuthenticated(false);
+    setUserName('');
+    setHasStarted(false);
+    setSavedCreations([]);
+  };
+
+  const handleStart = () => {
+    sessionStorage.setItem('hasStarted', 'true');
+    setHasStarted(true);
+  };
 
   const handleInspireMe = useCallback(() => {
     const randomPrompt = inspirationalPrompts[Math.floor(Math.random() * inspirationalPrompts.length)];
@@ -131,13 +190,8 @@ const App: React.FC = () => {
   }, [mode]);
 
   const handleImageGenerate = useCallback(async () => {
-    if (!appSettings.apiKey) {
-      setError('API 키가 설정되지 않았습니다. 설정에서 API 키를 입력해주세요.');
-      setIsSettingsOpen(true);
-      return;
-    }
     if (!prompt.trim() && baseImageFiles.length === 0 && referenceImageFiles.length === 0) {
-      setError('비전을 설명하거나 이미지를 업로드해주세요.');
+      setError('프롬프트를 입력하거나 이미지를 업로드해주세요.');
       return;
     }
     
@@ -161,7 +215,7 @@ const App: React.FC = () => {
         }))
       );
       
-      const results = await generateArt(appSettings.apiKey, prompt, baseImageUploads, referenceImageUploads, setLoadingMessage, artStyle, numOutputs, quality, negativePrompt);
+      const results = await generateArt(prompt, baseImageUploads, referenceImageUploads, setLoadingMessage, artStyle, numOutputs, quality, negativePrompt, imageAspectRatio);
       setGeneratedImages(results);
       
     } catch (err: any) {
@@ -170,12 +224,11 @@ const App: React.FC = () => {
       setIsLoading(false);
       setLoadingMessage('');
     }
-  }, [appSettings.apiKey, prompt, baseImageFiles, referenceImageFiles, artStyle, numOutputs, quality, negativePrompt]);
+  }, [prompt, baseImageFiles, referenceImageFiles, artStyle, numOutputs, quality, negativePrompt, imageAspectRatio]);
   
   const handleVideoGenerate = useCallback(async () => {
-    if (!appSettings.apiKey) {
-        setError('API 키가 설정되지 않았습니다. 설정에서 API 키를 입력해주세요.');
-        setIsSettingsOpen(true);
+    if (!isVeoKeyReady) {
+        setError('비디오 생성을 계속하려면 VEO API 키를 선택해야 합니다.');
         return;
     }
     if (allVideoImageFiles.length === 0 && !videoPrompt.trim()) {
@@ -211,16 +264,19 @@ const App: React.FC = () => {
           finalPrompt = videoPrompt || '이 이미지를 생동감 있게 만들어주세요.';
         }
 
-        const resultUrl = await generateVideo(appSettings.apiKey, finalPrompt, imageUploads, videoAspectRatio, videoResolution, setLoadingMessage);
+        const resultUrl = await generateVideo(finalPrompt, imageUploads, videoAspectRatio, videoResolution, setLoadingMessage);
         setGeneratedVideoUrl(resultUrl);
 
     } catch (err: any) {
+        if (err.message.includes("다른 키를 선택해주세요")) {
+          setIsVeoKeyReady(false); // Reset key state to prompt user to select again.
+        }
         setError(err.message || '알 수 없는 오류가 발생했습니다.');
     } finally {
         setIsLoading(false);
         setLoadingMessage('');
     }
-  }, [appSettings.apiKey, videoPrompt, backgroundImageFile, characterImageFile, otherImageFile, otherImageComment, videoAspectRatio, videoResolution, allVideoImageFiles, isMultiImageMode]);
+  }, [videoPrompt, backgroundImageFile, characterImageFile, otherImageFile, otherImageComment, videoAspectRatio, videoResolution, allVideoImageFiles, isMultiImageMode, isVeoKeyReady]);
 
   const handleSaveCreation = useCallback(async (imageToSave: string) => {
     if (imageToSave && !savedCreations.some(c => c.base64 === imageToSave)) {
@@ -260,9 +316,21 @@ const App: React.FC = () => {
     }
   }, []);
   
+  const handleSelectVeoKey = async () => {
+    try {
+      // @ts-ignore
+      await window.aistudio.openSelectKey();
+      // Assume success and update state to allow generation.
+      setIsVeoKeyReady(true);
+      setError(null);
+    } catch (e) {
+      console.error("API key selection failed", e);
+      setError("VEO API 키 선택에 실패했습니다.");
+    }
+  };
+
   const isImageGenerateDisabled = isLoading || (!prompt.trim() && baseImageFiles.length === 0 && referenceImageFiles.length === 0);
-  
-  const isVideoGenerateDisabled = isLoading || (allVideoImageFiles.length === 0 && !videoPrompt.trim());
+  const isVideoGenerateDisabled = isLoading || !isVeoKeyReady || (allVideoImageFiles.length === 0 && !videoPrompt.trim());
 
   const handleModeChange = (newMode: Mode) => {
     setMode(newMode);
@@ -285,7 +353,7 @@ const App: React.FC = () => {
 
   const SettingButton: React.FC<{ active: boolean, onClick: () => void, disabled?: boolean, children: React.ReactNode}> = ({ active, onClick, disabled, children }) => (
      <button onClick={onClick} disabled={disabled}
-        className={`w-full px-3 py-2 text-sm font-semibold rounded-lg transition-colors duration-200 border-2 ${
+        className={`flex-1 text-center px-3 py-2 text-sm font-semibold rounded-lg transition-colors duration-200 border-2 ${
             active 
                 ? 'bg-teal-500 border-teal-500 text-white' 
                 : 'bg-gray-700 border-gray-600 hover:bg-gray-600 hover:border-gray-500 text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed'
@@ -295,19 +363,37 @@ const App: React.FC = () => {
     </button>
   );
   
-  const ApiKeyBanner = () => (
-     <div className="text-center p-4 bg-yellow-900/50 border border-yellow-700 rounded-lg">
-        <p className="font-semibold mb-2">API 키 필요</p>
-        <p className="text-sm mb-3">AI 기능을 사용하려면 Gemini API 키를 설정해야 합니다.</p>
-        <button onClick={() => setIsSettingsOpen(true)} className="bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded transition-colors">
-            설정에서 API 키 입력하기
+  const VeoApiKeyBanner = () => (
+     <div className="text-center p-4 bg-blue-900/50 border border-blue-700 rounded-lg">
+        <p className="font-semibold mb-2">VEO API 키 선택 필요</p>
+        <p className="text-sm mb-3">비디오 생성을 위해서는 VEO 모델에 액세스할 수 있는 API 키를 선택해야 합니다. 선택한 키는 이 세션에만 사용됩니다.</p>
+        <p className="text-xs text-gray-400 mb-3">
+            프로젝트에 결제가 활성화되어 있어야 합니다. 
+            <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noopener noreferrer" className="text-purple-400 hover:underline ml-1">
+                자세히 알아보기
+            </a>
+        </p>
+        <button onClick={handleSelectVeoKey} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition-colors">
+            API 키 선택하기
         </button>
     </div>
   );
 
+  if (!isAuthenticated) {
+    return <LoginPage onLoginSuccess={handleLoginSuccess} />;
+  }
+
+  if (!hasStarted) {
+    return <GettingStartedPage onStart={handleStart} />;
+  }
+
   return (
-    <div className="min-h-screen bg-gray-900 text-gray-100 flex flex-col items-center">
-      <Header onSettingsClick={() => setIsSettingsOpen(true)} />
+    <div className="min-h-screen bg-gray-900 text-gray-100 flex flex-col">
+      <Header 
+        userName={userName}
+        onSettingsClick={() => setIsSettingsOpen(true)}
+        onLogout={handleLogout}
+      />
       <SettingsModal 
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
@@ -316,6 +402,9 @@ const App: React.FC = () => {
         onClearWorkspace={handleClearWorkspace}
       />
       <main className="container mx-auto p-4 md:p-8 flex-grow w-full flex flex-col items-center gap-8">
+        <div className="w-full text-center mb-4">
+             <p className="mt-3 text-lg text-gray-400">시그니처 스타일을 가진 아티스트.</p>
+        </div>
         <div className="w-full max-w-4xl flex flex-col lg:flex-row gap-8">
           {/* Left Panel: Controls */}
           <div className="w-full lg:w-1/2 flex flex-col">
@@ -331,7 +420,6 @@ const App: React.FC = () => {
             </div>
             
             <div className="flex flex-col gap-6 p-6 bg-gray-800/50 border border-t-0 border-gray-700 rounded-b-2xl shadow-lg flex-grow">
-              {!appSettings.apiKey && <ApiKeyBanner />}
               {mode === 'image' && (
                 <>
                   <StyleSelector
@@ -403,32 +491,51 @@ const App: React.FC = () => {
                       maxFiles={10}
                     />
                   </div>
-
+                  
                   <div>
-                    <label className="block text-lg font-semibold mb-2 text-teal-300">품질</label>
-                    <div className="flex flex-wrap gap-2">
-                      {qualityOptions.map(option => (
-                        <button key={option.id} onClick={() => setQuality(option.id)} disabled={isLoading}
-                          className={`px-4 py-2 text-sm font-semibold rounded-full transition-colors duration-200 border-2 ${quality === option.id ? 'bg-teal-500 border-teal-500 text-white' : 'bg-gray-700 border-gray-600 hover:bg-gray-600 hover:border-gray-500 text-gray-300 disabled:opacity-50'}`}
-                        >
-                          {option.label}
-                        </button>
-                      ))}
+                    <label className="block text-lg font-semibold text-teal-300 mb-2">생성 옵션</label>
+                    <div className="p-4 bg-gray-900/50 rounded-lg border border-gray-700 space-y-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
+                            <div className="sm:col-span-2">
+                                <label className="block text-sm font-medium text-gray-300 mb-1">품질</label>
+                                <div className="flex gap-2">
+                                    {qualityOptions.map(option => (
+                                        <SettingButton key={option.id} onClick={() => setQuality(option.id)} disabled={isLoading} active={quality === option.id}>
+                                            {option.label}
+                                        </SettingButton>
+                                    ))}
+                                </div>
+                            </div>
+                            <div className="sm:col-span-3">
+                                <label className="block text-sm font-medium text-gray-300 mb-1">이미지 규격</label>
+                                <div className="flex gap-2">
+                                    {imageAspectRatioOptions.map(option => (
+                                        <SettingButton key={option.id} onClick={() => setImageAspectRatio(option.id)} disabled={isLoading} active={imageAspectRatio === option.id}>
+                                            <div className="flex flex-col items-center justify-center leading-tight">
+                                                <span>{option.label.split('\n')[0]}</span>
+                                                <span className="text-xs">{option.label.split('\n')[1]}</span>
+                                            </div>
+                                        </SettingButton>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label htmlFor="num-outputs" className="block text-sm font-medium text-gray-300 mb-1">생성 개수</label>
+                            <select id="num-outputs" value={numOutputs} onChange={(e) => setNumOutputs(Number(e.target.value))} disabled={isLoading}
+                              className="bg-gray-700 border border-gray-600 rounded-md px-2 py-1 text-sm focus:ring-1 focus:ring-purple-500 disabled:opacity-50"
+                            >
+                              <option value={1}>1</option>
+                              <option value={2}>2</option>
+                              <option value={3}>3</option>
+                              <option value={4}>4</option>
+                            </select>
+                        </div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <label htmlFor="num-outputs" className="text-sm font-medium text-gray-300">생성 개수:</label>
-                    <select id="num-outputs" value={numOutputs} onChange={(e) => setNumOutputs(Number(e.target.value))} disabled={isLoading}
-                      className="bg-gray-700 border border-gray-600 rounded-md px-2 py-1 text-sm focus:ring-1 focus:ring-purple-500 disabled:opacity-50"
-                    >
-                      <option value={1}>1</option>
-                      <option value={2}>2</option>
-                      <option value={3}>3</option>
-                      <option value={4}>4</option>
-                    </select>
-                  </div>
                   
-                  <button onClick={handleImageGenerate} disabled={isImageGenerateDisabled || !appSettings.apiKey}
+                  <button onClick={handleImageGenerate} disabled={isImageGenerateDisabled}
                     className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-purple-600 to-teal-500 text-white font-bold py-4 px-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed hover:from-purple-700 hover:to-teal-600"
                   >
                     <SparklesIcon className="w-6 h-6" />
@@ -438,6 +545,7 @@ const App: React.FC = () => {
               )}
               {mode === 'video' && (
                 <>
+                    {!isVeoKeyReady && <VeoApiKeyBanner />}
                     <div>
                     <label htmlFor="video-prompt" className="block text-lg font-semibold mb-2 text-teal-300">
                         비디오 시나리오
@@ -516,10 +624,16 @@ const App: React.FC = () => {
                             <span className="text-sm font-medium text-gray-300">화면 비율</span>
                             <div className="flex gap-2 mt-1">
                                 <SettingButton onClick={() => setVideoAspectRatio('16:9')} disabled={isLoading || isMultiImageMode} active={videoAspectRatio === '16:9'}>
-                                    16:9 (가로)
+                                    <div className="flex flex-col items-center justify-center leading-tight">
+                                        <span>16:9</span>
+                                        <span className="text-xs">(가로)</span>
+                                    </div>
                                 </SettingButton>
                                 <SettingButton onClick={() => setVideoAspectRatio('9:16')} disabled={isLoading || isMultiImageMode} active={videoAspectRatio === '9:16'}>
-                                    9:16 (세로)
+                                    <div className="flex flex-col items-center justify-center leading-tight">
+                                        <span>9:16</span>
+                                        <span className="text-xs">(세로)</span>
+                                    </div>
                                 </SettingButton>
                             </div>
                         </div>
@@ -527,17 +641,23 @@ const App: React.FC = () => {
                             <span className="text-sm font-medium text-gray-300">해상도</span>
                             <div className="flex gap-2 mt-1">
                                 <SettingButton onClick={() => setVideoResolution('1080p')} disabled={isLoading || isMultiImageMode} active={videoResolution === '1080p'}>
-                                    1080p (고화질)
+                                    <div className="flex flex-col items-center justify-center leading-tight">
+                                        <span>1080p</span>
+                                        <span className="text-xs">(고화질)</span>
+                                    </div>
                                 </SettingButton>
                                 <SettingButton onClick={() => setVideoResolution('720p')} disabled={isLoading || isMultiImageMode} active={videoResolution === '720p'}>
-                                    720p (표준)
+                                    <div className="flex flex-col items-center justify-center leading-tight">
+                                        <span>720p</span>
+                                        <span className="text-xs">(표준)</span>
+                                    </div>
                                 </SettingButton>
                             </div>
                         </div>
                     </div>
                     </div>
                     
-                    <button onClick={handleVideoGenerate} disabled={isVideoGenerateDisabled || !appSettings.apiKey}
+                    <button onClick={handleVideoGenerate} disabled={isVideoGenerateDisabled}
                     className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-teal-600 to-cyan-500 text-white font-bold py-4 px-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed hover:from-teal-700 hover:to-cyan-600"
                     >
                     <VideoCameraIcon className="w-6 h-6" />
@@ -568,6 +688,7 @@ const App: React.FC = () => {
         </div>
 
         <Workspace 
+          userName={userName}
           creations={savedCreations}
           onSelectForEditing={handleSelectForEditing}
           onDelete={handleDeleteCreation}

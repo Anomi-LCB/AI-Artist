@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Modality, GenerateContentResponse, Part, AspectRatio, Resolution } from "@google/genai";
-import { ArtStyleId, QualityId } from "../types";
+import { ArtStyleId, QualityId, ImageAspectRatio } from "../types";
 
 const ARTIST_STYLE_PROMPT = `
 You are an AI artist with a very specific, consistent, and recognizable signature art style.
@@ -69,16 +69,7 @@ const QUALITY_PROMPTS: { [key in QualityId]: string } = {
   'High': 'Create the image with intricate details, ultra-high resolution, and masterpiece quality. Pay close attention to textures, lighting, and subtle nuances to make it look stunning and professional.',
 };
 
-
-const getAiClient = (apiKey: string) => {
-    if (!apiKey) {
-        throw new Error("API 키가 제공되지 않았습니다. 설정에서 API 키를 입력해주세요.");
-    }
-    return new GoogleGenAI({ apiKey });
-};
-
 export const generateArt = async (
-  apiKey: string,
   userPrompt: string,
   baseImages: { mimeType: string; data: string }[],
   referenceImages: { mimeType: string; data: string }[],
@@ -86,21 +77,24 @@ export const generateArt = async (
   artStyle: ArtStyleId,
   numOutputs: number,
   quality: QualityId,
-  negativePrompt: string
+  negativePrompt: string,
+  imageAspectRatio: ImageAspectRatio
 ): Promise<string[]> => {
-  const ai = getAiClient(apiKey);
+  // @ts-ignore
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   try {
     let finalPromptText: string;
     const finalArtistPrompt = ARTIST_STYLE_PROMPT + (STYLE_PROMPTS[artStyle] || '');
     const qualityInstruction = QUALITY_PROMPTS[quality] || '';
+    const aspectRatioInstruction = `\n\n**Aspect Ratio:** Please generate the image with a ${imageAspectRatio} aspect ratio.`;
     let finalPromptParts: Part[] = [];
 
     // Case 1: Base images are provided for direct modification/remake.
     if (baseImages.length > 0) {
       if (referenceImages.length > 0) {
         onStatusUpdate("이미지들을 조합하여 그림을 그리는 중...");
-        finalPromptText = `${finalArtistPrompt}\n\n**Task:** Redraw the **base image(s)** (the first image(s) provided) by incorporating the style, mood, and elements from the **reference images** (all subsequent images).\n\n**User's Instructions:** "${userPrompt || 'Combine them creatively.'}"\n\n**Quality Instructions:** ${qualityInstruction}`;
+        finalPromptText = `${finalArtistPrompt}\n\n**Task:** Redraw the **base image(s)** (the first image(s) provided) by incorporating the style, mood, and elements from the **reference images** (all subsequent images).\n\n**User's Instructions:** "${userPrompt || 'Combine them creatively.'}"\n\n**Quality Instructions:** ${qualityInstruction}${aspectRatioInstruction}`;
         finalPromptParts.push({ text: finalPromptText });
         baseImages.forEach(img => finalPromptParts.push({ inlineData: img }));
         referenceImages.forEach(img => finalPromptParts.push({ inlineData: img }));
@@ -112,7 +106,7 @@ export const generateArt = async (
 
 **User's Editing Instructions:** "${userPrompt}"
 
-**Quality Instructions:** ${qualityInstruction}`;
+**Quality Instructions:** ${qualityInstruction}${aspectRatioInstruction}`;
         finalPromptParts.push({ text: finalPromptText });
         baseImages.forEach(img => finalPromptParts.push({ inlineData: img }));
       }
@@ -150,7 +144,7 @@ export const generateArt = async (
       
       onStatusUpdate("분석을 기반으로 그림을 그리는 중...");
 
-      finalPromptText = `${finalArtistPrompt}\n\n**Based on the following analysis of a reference image, create a new illustration from scratch in your signature style:**\n"${imageDescription}"\n\n**Incorporate the user's specific instructions:** "${userPrompt || 'Create an image based on the analysis.'}"\n\n**Quality Instructions:** ${qualityInstruction}`;
+      finalPromptText = `${finalArtistPrompt}\n\n**Based on the following analysis of a reference image, create a new illustration from scratch in your signature style:**\n"${imageDescription}"\n\n**Incorporate the user's specific instructions:** "${userPrompt || 'Create an image based on the analysis.'}"\n\n**Quality Instructions:** ${qualityInstruction}${aspectRatioInstruction}`;
       
       if (negativePrompt && negativePrompt.trim()) {
         finalPromptText += `\n\n**Negative Prompt (Crucial Exclusion):** Under no circumstances should the final image contain any of the following elements or concepts: "${negativePrompt.trim()}". The artist must strictly avoid these.`;
@@ -161,7 +155,7 @@ export const generateArt = async (
     // Case 3: Text prompt only.
     } else {
         onStatusUpdate("프롬프트를 기반으로 그림을 그리는 중...");
-        finalPromptText = `${finalArtistPrompt}\n\n**User's Request:** "${userPrompt}"\n\n**Quality Instructions:** ${qualityInstruction}`;
+        finalPromptText = `${finalArtistPrompt}\n\n**User's Request:** "${userPrompt}"\n\n**Quality Instructions:** ${qualityInstruction}${aspectRatioInstruction}`;
         
         if (negativePrompt && negativePrompt.trim()) {
           finalPromptText += `\n\n**Negative Prompt (Crucial Exclusion):** Under no circumstances should the final image contain any of the following elements or concepts: "${negativePrompt.trim()}". The artist must strictly avoid these.`;
@@ -224,7 +218,6 @@ export const generateArt = async (
 };
 
 export const generateVideo = async (
-  apiKey: string,
   prompt: string,
   referenceImages: { mimeType: string; data: string }[],
   aspectRatio: AspectRatio,
@@ -232,7 +225,8 @@ export const generateVideo = async (
   onStatusUpdate: (message: string) => void
 ): Promise<string> => {
   try {
-    const ai = getAiClient(apiKey);
+    // @ts-ignore
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     onStatusUpdate('비디오 생성을 시작합니다...');
     
     if (referenceImages.length === 0) {
@@ -311,8 +305,8 @@ export const generateVideo = async (
     if (!downloadLink) {
       throw new Error("생성된 비디오 URI를 찾을 수 없습니다.");
     }
-    
-    const response = await fetch(`${downloadLink}&key=${apiKey}`);
+    // @ts-ignore
+    const response = await fetch(`${downloadLink}&key=${process.env.API_KEY}`);
     if (!response.ok) {
         throw new Error(`비디오 다운로드 실패: ${response.statusText}`);
     }
@@ -324,7 +318,7 @@ export const generateVideo = async (
     console.error("Error generating video:", error);
     if (error instanceof Error) {
       if (error.message.includes("Requested entity was not found")) {
-        throw new Error("API 키를 찾을 수 없거나 유효하지 않습니다. 설정에서 키를 확인해주세요.");
+        throw new Error("API 키를 찾을 수 없거나 유효하지 않습니다. 다른 키를 선택해주세요.");
       }
       throw new Error(`비디오를 생성하지 못했습니다: ${error.message}`);
     }

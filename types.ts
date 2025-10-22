@@ -2,6 +2,7 @@ export type ArtStyleId = '클래식' | '모노크롬 잉크' | '파스텔 수채
 export type QualityId = 'Standard' | 'High';
 export type AspectRatio = '16:9' | '9:16';
 export type Resolution = '720p' | '1080p';
+export type ImageAspectRatio = '1:1' | '16:9' | '9:16';
 
 export interface ArtStyleOption {
   id: ArtStyleId;
@@ -13,6 +14,11 @@ export interface QualityOption {
   label: string;
 }
 
+export interface ImageAspectRatioOption {
+  id: ImageAspectRatio;
+  label: string;
+}
+
 export interface WorkspaceCreation {
   id: number;
   base64: string;
@@ -20,8 +26,8 @@ export interface WorkspaceCreation {
 }
 
 export interface AppSettings {
-  apiKey: string;
   defaultArtStyle: ArtStyleId;
   defaultQuality: QualityId;
   defaultNumOutputs: number;
+  defaultImageAspectRatio: ImageAspectRatio;
 }
