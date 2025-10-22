@@ -2,8 +2,11 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { Header } from './components/Header';
 import { ImageInput } from './components/ImageInput';
 import { ArtDisplay } from './components/ArtDisplay';
+import { VideoDisplay } from './components/VideoDisplay';
 import { SparklesIcon } from './components/icons/SparklesIcon';
-import { generateArt } from './services/geminiService';
+import { PhotoIcon } from './components/icons/PhotoIcon';
+import { VideoCameraIcon } from './components/icons/VideoCameraIcon';
+import { generateArt, generateVideo } from './services/geminiService';
 import { fileToBase64, base64ToFile } from './utils/fileUtils';
 import { Workspace } from './components/Workspace';
 import { StyleSelector } from './components/StyleSelector';
@@ -11,22 +14,36 @@ import { ArtStyleId, QualityId, WorkspaceCreation } from './types';
 import { artStyleOptions, qualityOptions, inspirationalPrompts } from './constants';
 import { getAllCreations, addCreation, deleteCreation } from './lib/db';
 
-const App: React.FC = () => {
-  const [prompt, setPrompt] = useState<string>('');
-  const [negativePrompt, setNegativePrompt] = useState<string>('');
-  const [baseImageFiles, setBaseImageFiles] = useState<File[]>([]);
-  const [referenceImageFiles, setReferenceImageFiles] = useState<File[]>([]);
-  
-  const [artStyle, setArtStyle] = useState<ArtStyleId>(artStyleOptions[0].id);
-  const [quality, setQuality] = useState<QualityId>(qualityOptions[0].id);
-  const [numOutputs, setNumOutputs] = useState<number>(1);
+type Mode = 'image' | 'video';
 
-  const [generatedImages, setGeneratedImages] = useState<string[]>([]);
+const App: React.FC = () => {
+  const [mode, setMode] = useState<Mode>('image');
+  
+  // Shared state
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [loadingMessage, setLoadingMessage] = useState<string>('');
 
+  // Image Generation State
+  const [prompt, setPrompt] = useState<string>('');
+  const [negativePrompt, setNegativePrompt] = useState<string>('');
+  const [baseImageFiles, setBaseImageFiles] = useState<File[]>([]);
+  const [referenceImageFiles, setReferenceImageFiles] = useState<File[]>([]);
+  const [artStyle, setArtStyle] = useState<ArtStyleId>(artStyleOptions[0].id);
+  const [quality, setQuality] = useState<QualityId>(qualityOptions[0].id);
+  const [numOutputs, setNumOutputs] = useState<number>(1);
+  const [generatedImages, setGeneratedImages] = useState<string[]>([]);
   const [savedCreations, setSavedCreations] = useState<WorkspaceCreation[]>([]);
+
+  // Video Generation State
+  const [videoPrompt, setVideoPrompt] = useState<string>('');
+  const [backgroundImageFile, setBackgroundImageFile] = useState<File[]>([]);
+  const [characterImageFile, setCharacterImageFile] = useState<File[]>([]);
+  const [otherImageFile, setOtherImageFile] = useState<File[]>([]);
+  const [otherImageComment, setOtherImageComment] = useState<string>('');
+  const [generatedVideoUrl, setGeneratedVideoUrl] = useState<string | null>(null);
+  const [hasApiKey, setHasApiKey] = useState(false);
+
 
   // Load from IndexedDB on initial mount
   useEffect(() => {
@@ -40,16 +57,34 @@ const App: React.FC = () => {
       }
     };
     loadCreations();
+    
+    // Check for API key for Veo
+    window.aistudio.hasSelectedApiKey().then(setHasApiKey);
   }, []);
+  
+  const handleSelectKey = async () => {
+    try {
+      await window.aistudio.openSelectKey();
+      // Assume success to handle race condition
+      setHasApiKey(true);
+    } catch (e) {
+      console.error('API key selection failed', e);
+      setError('API 키를 선택하지 못했습니다.');
+    }
+  };
 
 
   const handleInspireMe = useCallback(() => {
     const randomPrompt = inspirationalPrompts[Math.floor(Math.random() * inspirationalPrompts.length)];
-    setPrompt(randomPrompt);
-  }, []);
+    if (mode === 'image') {
+      setPrompt(randomPrompt);
+    } else {
+      setVideoPrompt(randomPrompt)
+    }
+  }, [mode]);
 
-  const handleGenerate = useCallback(async () => {
-    if (!prompt.trim() && baseImageFiles.length === 0 && referenceImageFiles.length === 0) {
+  const handleImageGenerate = useCallback(async () => {
+    if ((baseImageFiles.length > 0 && !prompt.trim()) || (!prompt.trim() && baseImageFiles.length === 0 && referenceImageFiles.length === 0)) {
       setError('비전을 설명하거나 이미지를 업로드해주세요.');
       return;
     }
@@ -84,6 +119,56 @@ const App: React.FC = () => {
       setLoadingMessage('');
     }
   }, [prompt, baseImageFiles, referenceImageFiles, artStyle, numOutputs, quality, negativePrompt]);
+  
+  const handleVideoGenerate = useCallback(async () => {
+    const allImageFiles = [
+        ...backgroundImageFile,
+        ...characterImageFile,
+        ...otherImageFile
+    ];
+
+    if (!videoPrompt.trim() || allImageFiles.length === 0) {
+        setError('비디오 설명과 하나 이상의 참고 이미지를 입력해주세요.');
+        return;
+    }
+    
+    setError(null);
+    setGeneratedVideoUrl(null);
+    setIsLoading(true);
+    setLoadingMessage('생성을 시작합니다...');
+
+    try {
+        const imageUploads = await Promise.all(
+            allImageFiles.map(async (file) => ({
+                mimeType: file.type,
+                data: await fileToBase64(file),
+            }))
+        );
+
+        const promptParts = [];
+        if (characterImageFile.length > 0) promptParts.push('제공된 캐릭터 이미지를 주인공으로');
+        if (backgroundImageFile.length > 0) promptParts.push('제공된 배경 이미지 안에서');
+        if (otherImageFile.length > 0) {
+            const comment = otherImageComment.trim() ? `(${otherImageComment.trim()})` : '';
+            promptParts.push(`제공된 기타 이미지${comment}의 요소를 활용하여`);
+        }
+        
+        const descriptivePrefix = promptParts.length > 0 ? `${promptParts.join(', ')}, ` : '';
+        const finalPrompt = `${descriptivePrefix}다음 시나리오의 비디오를 만들어주세요: "${videoPrompt}"`;
+
+        const resultUrl = await generateVideo(finalPrompt, imageUploads, setLoadingMessage);
+        setGeneratedVideoUrl(resultUrl);
+
+    } catch (err: any) {
+        if (err.message && err.message.includes("API 키를 찾을 수 없습니다")) {
+            setHasApiKey(false); // Reset key state if it fails
+        }
+        setError(err.message || '알 수 없는 오류가 발생했습니다.');
+    } finally {
+        setIsLoading(false);
+        setLoadingMessage('');
+    }
+  }, [videoPrompt, backgroundImageFile, characterImageFile, otherImageFile, otherImageComment]);
 
   const handleSaveCreation = useCallback(async (imageToSave: string) => {
     if (imageToSave && !savedCreations.some(c => c.base64 === imageToSave)) {
@@ -110,6 +195,7 @@ const App: React.FC = () => {
 
   const handleSelectForEditing = useCallback(async (base64: string) => {
     try {
+        setMode('image');
         const file = await base64ToFile(base64, `editing-${Date.now()}.png`, 'image/png');
         setBaseImageFiles([file]);
         setReferenceImageFiles([]);
@@ -122,7 +208,29 @@ const App: React.FC = () => {
     }
   }, []);
   
-  const isGenerateButtonDisabled = isLoading || (!prompt.trim() && baseImageFiles.length === 0 && referenceImageFiles.length === 0);
+  const isImageGenerateDisabled = isLoading || (!prompt.trim() && baseImageFiles.length === 0 && referenceImageFiles.length === 0) || (baseImageFiles.length > 0 && !prompt.trim());
+  
+  const allImageFilesCount = backgroundImageFile.length + characterImageFile.length + otherImageFile.length;
+  const isVideoGenerateDisabled = isLoading || !videoPrompt.trim() || allImageFilesCount === 0 || !hasApiKey;
+
+  const handleModeChange = (newMode: Mode) => {
+    setMode(newMode);
+    setError(null);
+  };
+  
+  const ModeButton: React.FC<{ active: boolean, onClick: () => void, children: React.ReactNode}> = ({ active, onClick, children }) => (
+    <button
+      onClick={onClick}
+      disabled={isLoading}
+      className={`w-full flex items-center justify-center gap-2 px-4 py-3 font-semibold transition-colors duration-300 rounded-t-lg
+        ${active 
+            ? 'bg-gray-800/50 text-white border-b-2 border-purple-500' 
+            : 'bg-gray-900/50 text-gray-400 hover:bg-gray-800/30'
+        }`}
+    >
+        {children}
+    </button>
+  );
 
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100 flex flex-col items-center">
@@ -130,132 +238,238 @@ const App: React.FC = () => {
       <main className="container mx-auto p-4 md:p-8 flex-grow w-full flex flex-col items-center gap-8">
         <div className="w-full max-w-4xl flex flex-col lg:flex-row gap-8">
           {/* Left Panel: Controls */}
-          <div className="w-full lg:w-1/2 flex flex-col gap-6 p-6 bg-gray-800/50 border border-gray-700 rounded-2xl shadow-lg">
+          <div className="w-full lg:w-1/2 flex flex-col">
+            <div className="grid grid-cols-2">
+                <ModeButton active={mode === 'image'} onClick={() => handleModeChange('image')}>
+                    <PhotoIcon className="w-5 h-5" />
+                    <span>이미지 생성</span>
+                </ModeButton>
+                <ModeButton active={mode === 'video'} onClick={() => handleModeChange('video')}>
+                    <VideoCameraIcon className="w-5 h-5" />
+                    <span>비디오 생성</span>
+                </ModeButton>
+            </div>
             
-            <div className="flex flex-col gap-6 flex-grow">
-              
-              <StyleSelector
-                styles={artStyleOptions}
-                selectedStyle={artStyle}
-                onSelect={setArtStyle}
-                disabled={isLoading}
-              />
-              
-              <div>
-                <label htmlFor="prompt" className="block text-lg font-semibold mb-2 text-teal-300">
-                  {baseImageFiles.length > 0 ? "이미지 수정하기" : "비전 설명하기"}
-                </label>
-                <div className="relative">
-                  <textarea
-                    id="prompt"
-                    value={prompt}
-                    onChange={(e) => setPrompt(e.target.value)}
-                    placeholder={baseImageFiles.length > 0 ? "예: 캐릭터에게 왕관을 씌워주세요..." : "예: 폭풍우가 치는 바다 위의 노아의 방주..."}
-                    className="w-full h-36 p-3 bg-gray-900 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition"
+            <div className="flex flex-col gap-6 p-6 bg-gray-800/50 border border-t-0 border-gray-700 rounded-b-2xl shadow-lg flex-grow">
+              {mode === 'image' && (
+                <>
+                  <StyleSelector
+                    styles={artStyleOptions}
+                    selectedStyle={artStyle}
+                    onSelect={setArtStyle}
                     disabled={isLoading}
                   />
-                  <button onClick={handleInspireMe} disabled={isLoading} title="영감 얻기"
-                    className="absolute bottom-3 right-3 text-gray-400 hover:text-purple-400 transition-colors disabled:opacity-50"
-                  >
-                    <SparklesIcon className="w-5 h-5" />
-                  </button>
-                </div>
-              </div>
-              
-              <div>
-                <label htmlFor="negative-prompt" className="block text-lg font-semibold mb-2 text-teal-300">
-                  제외할 내용 <span className="text-sm text-gray-400 font-normal">(선택 사항)</span>
-                </label>
-                <div className="relative">
-                  <textarea
-                    id="negative-prompt"
-                    value={negativePrompt}
-                    onChange={(e) => setNegativePrompt(e.target.value)}
-                    placeholder="예: 텍스트, 흐릿함, 6개 이상의 손가락..."
-                    className="w-full h-24 p-3 bg-gray-900 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition"
-                    disabled={isLoading}
-                  />
-                </div>
-              </div>
+                  
+                  <div>
+                    <label htmlFor="prompt" className="block text-lg font-semibold mb-2 text-teal-300">
+                      {baseImageFiles.length > 0 ? "이미지 수정하기" : "비전 설명하기"}
+                    </label>
+                    <div className="relative">
+                      <textarea
+                        id="prompt"
+                        value={prompt}
+                        onChange={(e) => setPrompt(e.target.value)}
+                        placeholder={baseImageFiles.length > 0 ? "예: 캐릭터에게 왕관을 씌워주세요..." : "예: 폭풍우가 치는 바다 위의 노아의 방주..."}
+                        className="w-full h-36 p-3 bg-gray-900 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition"
+                        disabled={isLoading}
+                      />
+                      <button onClick={handleInspireMe} disabled={isLoading} title="영감 얻기"
+                        className="absolute bottom-3 right-3 text-gray-400 hover:text-purple-400 transition-colors disabled:opacity-50"
+                      >
+                        <SparklesIcon className="w-5 h-5" />
+                      </button>
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <label htmlFor="negative-prompt" className="block text-lg font-semibold mb-2 text-teal-300">
+                      제외할 내용 <span className="text-sm text-gray-400 font-normal">(선택 사항)</span>
+                    </label>
+                    <div className="relative">
+                      <textarea
+                        id="negative-prompt"
+                        value={negativePrompt}
+                        onChange={(e) => setNegativePrompt(e.target.value)}
+                        placeholder="예: 텍스트, 흐릿함, 6개 이상의 손가락..."
+                        className="w-full h-24 p-3 bg-gray-900 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition"
+                        disabled={isLoading}
+                      />
+                    </div>
+                  </div>
 
-              <div>
-                <label className="block text-lg font-semibold mb-2 text-teal-300">
-                  변경할 이미지 <span className="text-sm text-gray-400 font-normal">(기반)</span>
-                </label>
-                <p className="text-sm text-gray-400 mb-2 -mt-1">여기에 업로드된 이미지를 직접 수정, 변형, 또는 리메이크합니다.</p>
-                <ImageInput 
-                  files={baseImageFiles} 
-                  onFilesChange={setBaseImageFiles} 
-                  isLoading={isLoading} 
-                  maxFiles={5}
-                />
-              </div>
+                  <div>
+                    <label className="block text-lg font-semibold mb-2 text-teal-300">
+                      변경할 이미지 <span className="text-sm text-gray-400 font-normal">(기반)</span>
+                    </label>
+                    <p className="text-sm text-gray-400 mb-2 -mt-1">여기에 업로드된 이미지를 직접 수정, 변형, 또는 리메이크합니다.</p>
+                    <ImageInput 
+                      files={baseImageFiles} 
+                      onFilesChange={setBaseImageFiles} 
+                      isLoading={isLoading} 
+                      maxFiles={5}
+                    />
+                  </div>
 
-              <div>
-                <label className="block text-lg font-semibold mb-2 text-teal-300">
-                  참고 이미지 <span className="text-sm text-gray-400 font-normal">(영감/스타일)</span>
-                </label>
-                 <p className="text-sm text-gray-400 mb-2 -mt-1">영감을 주거나 스타일, 캐릭터, 요소를 추가하는 데 사용됩니다.</p>
-                <ImageInput 
-                  files={referenceImageFiles} 
-                  onFilesChange={setReferenceImageFiles} 
-                  isLoading={isLoading}
-                  maxFiles={10}
-                />
-              </div>
+                  <div>
+                    <label className="block text-lg font-semibold mb-2 text-teal-300">
+                      참고 이미지 <span className="text-sm text-gray-400 font-normal">(영감/스타일)</span>
+                    </label>
+                    <p className="text-sm text-gray-400 mb-2 -mt-1">영감을 주거나 스타일, 캐릭터, 요소를 추가하는 데 사용됩니다.</p>
+                    <ImageInput 
+                      files={referenceImageFiles} 
+                      onFilesChange={setReferenceImageFiles} 
+                      isLoading={isLoading}
+                      maxFiles={10}
+                    />
+                  </div>
 
-              <div>
-                <label className="block text-lg font-semibold mb-2 text-teal-300">품질</label>
-                <div className="flex flex-wrap gap-2">
-                  {qualityOptions.map(option => (
-                    <button key={option.id} onClick={() => setQuality(option.id)} disabled={isLoading}
-                      className={`px-4 py-2 text-sm font-semibold rounded-full transition-colors duration-200 border-2 ${quality === option.id ? 'bg-teal-500 border-teal-500 text-white' : 'bg-gray-700 border-gray-600 hover:bg-gray-600 hover:border-gray-500 text-gray-300 disabled:opacity-50'}`}
+                  <div>
+                    <label className="block text-lg font-semibold mb-2 text-teal-300">품질</label>
+                    <div className="flex flex-wrap gap-2">
+                      {qualityOptions.map(option => (
+                        <button key={option.id} onClick={() => setQuality(option.id)} disabled={isLoading}
+                          className={`px-4 py-2 text-sm font-semibold rounded-full transition-colors duration-200 border-2 ${quality === option.id ? 'bg-teal-500 border-teal-500 text-white' : 'bg-gray-700 border-gray-600 hover:bg-gray-600 hover:border-gray-500 text-gray-300 disabled:opacity-50'}`}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label htmlFor="num-outputs" className="text-sm font-medium text-gray-300">생성 개수:</label>
+                    <select id="num-outputs" value={numOutputs} onChange={(e) => setNumOutputs(Number(e.target.value))} disabled={isLoading}
+                      className="bg-gray-700 border border-gray-600 rounded-md px-2 py-1 text-sm focus:ring-1 focus:ring-purple-500 disabled:opacity-50"
                     >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
+                      <option value={1}>1</option>
+                      <option value={2}>2</option>
+                      <option value={3}>3</option>
+                      <option value={4}>4</option>
+                    </select>
+                  </div>
+                  
+                  <button onClick={handleImageGenerate} disabled={isImageGenerateDisabled}
+                    className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-purple-600 to-teal-500 text-white font-bold py-4 px-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed hover:from-purple-700 hover:to-teal-600"
+                  >
+                    <SparklesIcon className="w-6 h-6" />
+                    <span>{isImageGenerateDisabled && baseImageFiles.length > 0 ? "수정할 내용을 입력하세요" : "아트 생성"}</span>
+                  </button>
+                </>
+              )}
+              {mode === 'video' && (
+                <>
+                  {!hasApiKey ? (
+                    <div className="text-center p-4 bg-yellow-900/50 border border-yellow-700 rounded-lg">
+                      <p className="font-semibold mb-2">API 키 선택 필요</p>
+                      <p className="text-sm mb-3">Veo 비디오 생성을 사용하려면 API 키를 선택해야 합니다. <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noopener noreferrer" className="underline hover:text-yellow-300">결제</a>가 활성화된 프로젝트의 키를 선택하세요.</p>
+                      <button onClick={handleSelectKey} className="bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded transition-colors">
+                        API 키 선택
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                       <div>
+                        <label htmlFor="video-prompt" className="block text-lg font-semibold mb-2 text-teal-300">
+                          비디오 시나리오
+                        </label>
+                        <div className="relative">
+                          <textarea
+                            id="video-prompt"
+                            value={videoPrompt}
+                            onChange={(e) => setVideoPrompt(e.target.value)}
+                            placeholder="예: 캐릭터가 배경 숲을 탐험합니다..."
+                            className="w-full h-36 p-3 bg-gray-900 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition"
+                            disabled={isLoading}
+                          />
+                           <button onClick={handleInspireMe} disabled={isLoading} title="영감 얻기"
+                            className="absolute bottom-3 right-3 text-gray-400 hover:text-purple-400 transition-colors disabled:opacity-50"
+                          >
+                            <SparklesIcon className="w-5 h-5" />
+                          </button>
+                        </div>
+                      </div>
+                      
+                      <div>
+                        <label className="block text-lg font-semibold mb-2 text-teal-300">
+                          배경 이미지 <span className="text-sm text-gray-400 font-normal">(최대 3개)</span>
+                        </label>
+                        <ImageInput 
+                          files={backgroundImageFile} 
+                          onFilesChange={setBackgroundImageFile} 
+                          isLoading={isLoading}
+                          maxFiles={3}
+                        />
+                      </div>
 
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex items-center gap-2">
-                <label htmlFor="num-outputs" className="text-sm font-medium text-gray-300">생성 개수:</label>
-                <select id="num-outputs" value={numOutputs} onChange={(e) => setNumOutputs(Number(e.target.value))} disabled={isLoading}
-                    className="bg-gray-900 border border-gray-600 rounded-md px-3 py-1.5 text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                >
-                    <option value={1}>1개</option>
-                    <option value={3}>3개</option>
-                </select>
-              </div>
+                      <div>
+                        <label className="block text-lg font-semibold mb-2 text-teal-300">
+                          캐릭터 이미지 <span className="text-sm text-gray-400 font-normal">(최대 10개)</span>
+                        </label>
+                        <ImageInput 
+                          files={characterImageFile} 
+                          onFilesChange={setCharacterImageFile} 
+                          isLoading={isLoading}
+                          maxFiles={10}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-lg font-semibold mb-2 text-teal-300">
+                          기타 이미지 <span className="text-sm text-gray-400 font-normal">(최대 5개)</span>
+                        </label>
+                        <p className="text-sm text-gray-400 mb-2 -mt-1">참고할 특정 아이템이나 컨셉을 추가하세요.</p>
+                        <ImageInput 
+                          files={otherImageFile} 
+                          onFilesChange={setOtherImageFile} 
+                          isLoading={isLoading}
+                          maxFiles={5}
+                        />
+                        <input
+                          type="text"
+                          value={otherImageComment}
+                          onChange={(e) => setOtherImageComment(e.target.value)}
+                          placeholder="이 이미지는 '마법 검'입니다 (선택 사항)"
+                          className="w-full mt-2 p-2 bg-gray-900 border border-gray-600 rounded-lg focus:ring-1 focus:ring-purple-500 transition"
+                          disabled={isLoading}
+                        />
+                      </div>
+                      
+                      <button onClick={handleVideoGenerate} disabled={isVideoGenerateDisabled}
+                        className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-teal-600 to-cyan-500 text-white font-bold py-4 px-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed hover:from-teal-700 hover:to-cyan-600"
+                      >
+                        <VideoCameraIcon className="w-6 h-6" />
+                        <span>비디오 생성</span>
+                      </button>
+                    </>
+                  )}
+                </>
+              )}
             </div>
-            
-            <button
-              onClick={handleGenerate}
-              disabled={isGenerateButtonDisabled}
-              className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-purple-600 to-teal-500 text-white font-bold py-3 px-4 rounded-lg hover:from-purple-700 hover:to-teal-600 transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100"
-            >
-              <SparklesIcon className="w-5 h-5" />
-              <span>{isLoading ? loadingMessage : '아트 생성'}</span>
-            </button>
           </div>
 
           {/* Right Panel: Display */}
-          <ArtDisplay 
-            images={generatedImages} 
-            isLoading={isLoading} 
-            error={error} 
-            loadingMessage={loadingMessage}
-            onSave={handleSaveCreation} 
-          />
+          {mode === 'image' ? (
+            <ArtDisplay 
+              images={generatedImages} 
+              isLoading={isLoading} 
+              error={error} 
+              loadingMessage={loadingMessage}
+              onSave={handleSaveCreation}
+            />
+          ) : (
+            <VideoDisplay
+                videoUrl={generatedVideoUrl}
+                isLoading={isLoading}
+                error={error}
+                loadingMessage={loadingMessage}
+            />
+          )}
         </div>
-        
-        <Workspace 
-          creations={savedCreations} 
-          onSelectForEditing={handleSelectForEditing}
-          onDelete={handleDeleteCreation} 
-        />
 
+        <Workspace 
+          creations={savedCreations}
+          onSelectForEditing={handleSelectForEditing}
+          onDelete={handleDeleteCreation}
+        />
       </main>
     </div>
   );

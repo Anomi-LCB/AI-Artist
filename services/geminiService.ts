@@ -103,8 +103,14 @@ export const generateArt = async (
         baseImages.forEach(img => finalPromptParts.push({ inlineData: img }));
         referenceImages.forEach(img => finalPromptParts.push({ inlineData: img }));
       } else {
-        onStatusUpdate("이미지를 기반으로 그림을 그리는 중...");
-        finalPromptText = `${finalArtistPrompt}\n\n**Task:** Redraw the provided image(s) from scratch in your signature style.\n\n**User's Instructions:** "${userPrompt || 'Recreate it faithfully in your style.'}"\n\n**Quality Instructions:** ${qualityInstruction}`;
+        onStatusUpdate("이미지를 수정하는 중...");
+        finalPromptText = `**Task:** You are an expert image editor. Edit the provided image based on the user's specific instructions. The output should be a modified version of the original image. Only if no specific edit instruction is given, redraw the image in your signature style.
+
+**Your Signature Style (use if redrawing):**\n${finalArtistPrompt}
+
+**User's Editing Instructions:** "${userPrompt}"
+
+**Quality Instructions:** ${qualityInstruction}`;
         finalPromptParts.push({ text: finalPromptText });
         baseImages.forEach(img => finalPromptParts.push({ inlineData: img }));
       }
@@ -212,5 +218,92 @@ export const generateArt = async (
         throw new Error(`아트를 생성하지 못했습니다: ${error.message}`);
     }
     throw new Error("아트를 생성하지 못했습니다. 다시 시도해주세요.");
+  }
+};
+
+export const generateVideo = async (
+  prompt: string,
+  referenceImages: { mimeType: string; data: string }[],
+  onStatusUpdate: (message: string) => void
+): Promise<string> => {
+  try {
+    // Re-initialize client to ensure latest API key is used
+    const ai = getAiClient();
+    onStatusUpdate('비디오 생성을 시작합니다...');
+    
+    if (referenceImages.length === 0) {
+      throw new Error("비디오를 생성하려면 참고 이미지가 최소 1개 이상 필요합니다.");
+    }
+    
+    const model = 'veo-3.1-generate-preview';
+    const resolution = '720p';
+    const aspectRatio = '16:9';
+    
+    const referenceImagesPayload = referenceImages.map(img => ({
+        image: {
+            imageBytes: img.data,
+            mimeType: img.mimeType,
+        },
+        referenceType: 'ASSET',
+    }));
+
+    let operation = await ai.models.generateVideos({
+      model: model,
+      prompt: prompt,
+      config: {
+        numberOfVideos: 1,
+        referenceImages: referenceImagesPayload,
+        resolution: resolution,
+        aspectRatio: aspectRatio,
+      }
+    });
+
+    onStatusUpdate('모델이 프롬프트를 분석 중입니다...');
+    
+    const pollIntervals = [
+      { duration: 30000, message: '장면을 구성하고 있습니다... 이 과정은 몇 분 정도 소요될 수 있습니다.' },
+      { duration: 30000, message: '거의 다 됐습니다... 최종 렌더링 중입니다.' },
+    ];
+    let pollIndex = 0;
+
+    while (!operation.done) {
+      await new Promise(resolve => setTimeout(resolve, 10000));
+      operation = await ai.operations.getVideosOperation({ operation: operation });
+      
+      // Update status message based on polling intervals
+      if (pollIndex < pollIntervals.length && !operation.done) {
+          onStatusUpdate(pollIntervals[pollIndex].message);
+          await new Promise(resolve => setTimeout(resolve, pollIntervals[pollIndex].duration));
+          pollIndex++;
+      } else if (!operation.done) {
+          onStatusUpdate('생성이 예상보다 오래 걸리고 있습니다...');
+      }
+    }
+    
+    onStatusUpdate('비디오를 가져오는 중...');
+    const downloadLink = operation.response?.generatedVideos?.[0]?.video?.uri;
+
+    if (!downloadLink) {
+      throw new Error("생성된 비디오 URI를 찾을 수 없습니다.");
+    }
+    
+    // The response.body contains the MP4 bytes. You must append an API key when fetching from the download link.
+    const response = await fetch(`${downloadLink}&key=${process.env.API_KEY}`);
+    if (!response.ok) {
+        throw new Error(`비디오 다운로드 실패: ${response.statusText}`);
+    }
+
+    const blob = await response.blob();
+    return URL.createObjectURL(blob);
+
+  } catch (error) {
+    console.error("Error generating video:", error);
+    if (error instanceof Error) {
+      if (error.message.includes("Requested entity was not found")) {
+        throw new Error("API 키를 찾을 수 없습니다. 키를 다시 선택해주세요.");
+      }
+      throw new Error(`비디오를 생성하지 못했습니다: ${error.message}`);
+    }
+    throw new Error("비디오를 생성하지 못했습니다. 다시 시도해주세요.");
   }
 };
