@@ -18,3 +18,10 @@ export interface WorkspaceCreation {
   base64: string;
   createdAt: Date;
 }
+
+export interface AppSettings {
+  apiKey: string;
+  defaultArtStyle: ArtStyleId;
+  defaultQuality: QualityId;
+  defaultNumOutputs: number;
+}

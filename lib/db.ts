@@ -78,3 +78,16 @@ export const deleteCreation = async (id: number): Promise<void> => {
     transaction.oncomplete = () => db.close();
   });
 };
+
+export const clearAllCreations = async (): Promise<void> => {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const transaction = db.transaction(STORE_NAME, 'readwrite');
+        const store = transaction.objectStore(STORE_NAME);
+        const request = store.clear();
+
+        request.onsuccess = () => resolve();
+        request.onerror = (event) => reject((event.target as IDBRequest).error);
+        transaction.oncomplete = () => db.close();
+    });
+};

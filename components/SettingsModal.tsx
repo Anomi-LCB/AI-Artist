@@ -1,25 +1,28 @@
 import React, { useState, useEffect } from 'react';
+import { AppSettings, ArtStyleId, QualityId } from '../types';
+import { artStyleOptions, qualityOptions } from '../constants';
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (settings: { apiKey: string }) => void;
-  currentApiKey: string;
+  onSave: (settings: AppSettings) => void;
+  currentSettings: AppSettings;
+  onClearWorkspace: () => void;
 }
 
-export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onSave, currentApiKey }) => {
-  const [localApiKey, setLocalApiKey] = useState(currentApiKey);
+export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onSave, currentSettings, onClearWorkspace }) => {
+  const [localSettings, setLocalSettings] = useState(currentSettings);
 
   useEffect(() => {
-    setLocalApiKey(currentApiKey);
-  }, [currentApiKey, isOpen]);
+    setLocalSettings(currentSettings);
+  }, [currentSettings, isOpen]);
 
   if (!isOpen) {
     return null;
   }
 
   const handleSave = () => {
-    onSave({ apiKey: localApiKey });
+    onSave(localSettings);
     onClose();
   };
   
@@ -27,6 +30,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
     if (e.target === e.currentTarget) {
       onClose();
     }
+  };
+  
+  const handleInputChange = (field: keyof AppSettings, value: string | number) => {
+    setLocalSettings(prev => ({...prev, [field]: value}));
   };
 
   return (
@@ -36,8 +43,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
       aria-modal="true"
       role="dialog"
     >
-      <div className="bg-gray-800 rounded-2xl shadow-2xl p-8 w-full max-w-md border border-gray-700 m-4">
-        <div className="flex justify-between items-center mb-6">
+      <div className="bg-gray-800 rounded-2xl shadow-2xl p-8 w-full max-w-md border border-gray-700 m-4 flex flex-col max-h-[90vh]">
+        <div className="flex justify-between items-center mb-6 flex-shrink-0">
           <h2 className="text-2xl font-bold text-teal-300">설정</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-white transition-colors" aria-label="닫기">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -46,7 +53,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
           </button>
         </div>
         
-        <div className="space-y-6">
+        <div className="space-y-6 overflow-y-auto pr-2 -mr-2">
           <div>
             <label htmlFor="api-key" className="block text-lg font-semibold mb-2 text-gray-200">
               Google Gemini API 키
@@ -54,8 +61,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
             <input
               id="api-key"
               type="password"
-              value={localApiKey}
-              onChange={(e) => setLocalApiKey(e.target.value)}
+              value={localSettings.apiKey}
+              onChange={(e) => handleInputChange('apiKey', e.target.value)}
               placeholder="API 키를 여기에 붙여넣으세요"
               className="w-full p-3 bg-gray-900 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition"
             />
@@ -71,14 +78,64 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
               </a>
             </p>
           </div>
-          {/* 향후 다른 설정을 추가할 수 있는 공간 */}
+          
           <div className="border-t border-gray-700 pt-6">
-             <h3 className="text-lg font-semibold text-gray-200 mb-2">기타 설정</h3>
-             <p className="text-sm text-gray-500">향후 추가될 설정들이 여기에 표시됩니다.</p>
+             <h3 className="text-lg font-semibold text-gray-200 mb-4">기본 생성 설정</h3>
+             <div className="space-y-4">
+                <div>
+                    <label htmlFor="default-art-style" className="block text-sm font-medium text-gray-300 mb-1">기본 아트 스타일</label>
+                    <select
+                        id="default-art-style"
+                        value={localSettings.defaultArtStyle}
+                        onChange={(e) => handleInputChange('defaultArtStyle', e.target.value as ArtStyleId)}
+                        className="w-full p-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-1 focus:ring-purple-500 transition"
+                    >
+                        {artStyleOptions.map(opt => <option key={opt.id} value={opt.id}>{opt.id}</option>)}
+                    </select>
+                </div>
+                <div>
+                    <label htmlFor="default-quality" className="block text-sm font-medium text-gray-300 mb-1">기본 품질</label>
+                    <select
+                        id="default-quality"
+                        value={localSettings.defaultQuality}
+                        onChange={(e) => handleInputChange('defaultQuality', e.target.value as QualityId)}
+                        className="w-full p-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-1 focus:ring-purple-500 transition"
+                    >
+                        {qualityOptions.map(opt => <option key={opt.id} value={opt.id}>{opt.label}</option>)}
+                    </select>
+                </div>
+                 <div>
+                    <label htmlFor="default-num-outputs" className="block text-sm font-medium text-gray-300 mb-1">기본 생성 개수</label>
+                    <select
+                        id="default-num-outputs"
+                        value={localSettings.defaultNumOutputs}
+                        onChange={(e) => handleInputChange('defaultNumOutputs', Number(e.target.value))}
+                        className="w-full p-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-1 focus:ring-purple-500 transition"
+                    >
+                        <option value={1}>1</option>
+                        <option value={2}>2</option>
+                        <option value={3}>3</option>
+                        <option value={4}>4</option>
+                    </select>
+                </div>
+             </div>
+          </div>
+          
+          <div className="border-t border-gray-700 pt-6">
+            <h3 className="text-lg font-semibold text-red-400 mb-2">위험 구역</h3>
+            <p className="text-sm text-gray-400 mb-4">
+              이 작업은 되돌릴 수 없습니다. 신중하게 진행해주세요.
+            </p>
+            <button
+              onClick={onClearWorkspace}
+              className="w-full px-4 py-2 font-bold text-white bg-red-800 rounded-lg hover:bg-red-700 transition-colors border border-red-600"
+            >
+              워크스페이스 비우기
+            </button>
           </div>
         </div>
 
-        <div className="mt-8 flex justify-end gap-4">
+        <div className="mt-8 flex justify-end gap-4 flex-shrink-0">
           <button
             onClick={onClose}
             className="px-6 py-2 font-semibold text-gray-300 bg-gray-700 rounded-lg hover:bg-gray-600 transition-colors"

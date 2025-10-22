@@ -11,13 +11,20 @@ import { fileToBase64, base64ToFile } from './utils/fileUtils';
 import { Workspace } from './components/Workspace';
 import { StyleSelector } from './components/StyleSelector';
 import { SettingsModal } from './components/SettingsModal';
-import { ArtStyleId, QualityId, WorkspaceCreation, AspectRatio, Resolution } from './types';
+import { ArtStyleId, QualityId, WorkspaceCreation, AspectRatio, Resolution, AppSettings } from './types';
 import { artStyleOptions, qualityOptions, inspirationalPrompts } from './constants';
-import { getAllCreations, addCreation, deleteCreation } from './lib/db';
+import { getAllCreations, addCreation, deleteCreation, clearAllCreations } from './lib/db';
 
 type Mode = 'image' | 'video';
 
-const API_KEY_STORAGE_KEY = 'gemini-api-key';
+const SETTINGS_STORAGE_KEY = 'gemini-artist-settings';
+
+const DEFAULT_SETTINGS: AppSettings = {
+  apiKey: '',
+  defaultArtStyle: artStyleOptions[0].id,
+  defaultQuality: qualityOptions[0].id,
+  defaultNumOutputs: 1,
+};
 
 const App: React.FC = () => {
   const [mode, setMode] = useState<Mode>('image');
@@ -26,7 +33,7 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [loadingMessage, setLoadingMessage] = useState<string>('');
-  const [apiKey, setApiKey] = useState<string>('');
+  const [appSettings, setAppSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   // Image Generation State
@@ -34,9 +41,9 @@ const App: React.FC = () => {
   const [negativePrompt, setNegativePrompt] = useState<string>('');
   const [baseImageFiles, setBaseImageFiles] = useState<File[]>([]);
   const [referenceImageFiles, setReferenceImageFiles] = useState<File[]>([]);
-  const [artStyle, setArtStyle] = useState<ArtStyleId>(artStyleOptions[0].id);
-  const [quality, setQuality] = useState<QualityId>(qualityOptions[0].id);
-  const [numOutputs, setNumOutputs] = useState<number>(1);
+  const [artStyle, setArtStyle] = useState<ArtStyleId>(DEFAULT_SETTINGS.defaultArtStyle);
+  const [quality, setQuality] = useState<QualityId>(DEFAULT_SETTINGS.defaultQuality);
+  const [numOutputs, setNumOutputs] = useState<number>(DEFAULT_SETTINGS.defaultNumOutputs);
   const [generatedImages, setGeneratedImages] = useState<string[]>([]);
   const [savedCreations, setSavedCreations] = useState<WorkspaceCreation[]>([]);
 
@@ -63,10 +70,21 @@ const App: React.FC = () => {
   // Load from storage on initial mount
   useEffect(() => {
     const loadData = async () => {
-      // Load API Key
-      const savedApiKey = localStorage.getItem(API_KEY_STORAGE_KEY);
-      if (savedApiKey) {
-        setApiKey(savedApiKey);
+      // Load Settings
+      try {
+        const savedSettingsString = localStorage.getItem(SETTINGS_STORAGE_KEY);
+        if (savedSettingsString) {
+          const savedSettings = JSON.parse(savedSettingsString) as AppSettings;
+          setAppSettings(savedSettings);
+          // Apply loaded settings to state
+          setArtStyle(savedSettings.defaultArtStyle);
+          setQuality(savedSettings.defaultQuality);
+          setNumOutputs(savedSettings.defaultNumOutputs);
+        }
+      } catch (err) {
+        console.error("Failed to load settings from LocalStorage", err);
+        // Fallback to default
+        setAppSettings(DEFAULT_SETTINGS);
       }
 
       // Load creations from IndexedDB
@@ -81,10 +99,28 @@ const App: React.FC = () => {
     loadData();
   }, []);
   
-  const handleSaveSettings = (settings: { apiKey: string }) => {
-    setApiKey(settings.apiKey);
-    localStorage.setItem(API_KEY_STORAGE_KEY, settings.apiKey);
+  const handleSaveSettings = (newSettings: AppSettings) => {
+    setAppSettings(newSettings);
+    // Apply new default settings to the current state if they haven't been changed by the user
+    setArtStyle(newSettings.defaultArtStyle);
+    setQuality(newSettings.defaultQuality);
+    setNumOutputs(newSettings.defaultNumOutputs);
+    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(newSettings));
   };
+
+  const handleClearWorkspace = async () => {
+    if (window.confirm('정말로 워크스페이스의 모든 창작물을 영구적으로 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.')) {
+        try {
+            await clearAllCreations();
+            setSavedCreations([]);
+            setIsSettingsOpen(false); // Close modal on success
+        } catch (err) {
+            console.error("Failed to clear workspace", err);
+            setError("워크스페이스를 비우는 데 실패했습니다.");
+        }
+    }
+  };
+
 
   const handleInspireMe = useCallback(() => {
     const randomPrompt = inspirationalPrompts[Math.floor(Math.random() * inspirationalPrompts.length)];
@@ -96,7 +132,7 @@ const App: React.FC = () => {
   }, [mode]);
 
   const handleImageGenerate = useCallback(async () => {
-    if (!apiKey) {
+    if (!appSettings.apiKey) {
       setError('API 키가 설정되지 않았습니다. 설정에서 API 키를 입력해주세요.');
       setIsSettingsOpen(true);
       return;
@@ -126,7 +162,7 @@ const App: React.FC = () => {
         }))
       );
       
-      const results = await generateArt(apiKey, prompt, baseImageUploads, referenceImageUploads, setLoadingMessage, artStyle, numOutputs, quality, negativePrompt);
+      const results = await generateArt(appSettings.apiKey, prompt, baseImageUploads, referenceImageUploads, setLoadingMessage, artStyle, numOutputs, quality, negativePrompt);
       setGeneratedImages(results);
       
     } catch (err: any) {
@@ -135,10 +171,10 @@ const App: React.FC = () => {
       setIsLoading(false);
       setLoadingMessage('');
     }
-  }, [apiKey, prompt, baseImageFiles, referenceImageFiles, artStyle, numOutputs, quality, negativePrompt]);
+  }, [appSettings.apiKey, prompt, baseImageFiles, referenceImageFiles, artStyle, numOutputs, quality, negativePrompt]);
   
   const handleVideoGenerate = useCallback(async () => {
-    if (!apiKey) {
+    if (!appSettings.apiKey) {
         setError('API 키가 설정되지 않았습니다. 설정에서 API 키를 입력해주세요.');
         setIsSettingsOpen(true);
         return;
@@ -176,7 +212,7 @@ const App: React.FC = () => {
           finalPrompt = videoPrompt || '이 이미지를 생동감 있게 만들어주세요.';
         }
 
-        const resultUrl = await generateVideo(apiKey, finalPrompt, imageUploads, videoAspectRatio, videoResolution, setLoadingMessage);
+        const resultUrl = await generateVideo(appSettings.apiKey, finalPrompt, imageUploads, videoAspectRatio, videoResolution, setLoadingMessage);
         setGeneratedVideoUrl(resultUrl);
 
     } catch (err: any) {
@@ -185,7 +221,7 @@ const App: React.FC = () => {
         setIsLoading(false);
         setLoadingMessage('');
     }
-  }, [apiKey, videoPrompt, backgroundImageFile, characterImageFile, otherImageFile, otherImageComment, videoAspectRatio, videoResolution, allVideoImageFiles, isMultiImageMode]);
+  }, [appSettings.apiKey, videoPrompt, backgroundImageFile, characterImageFile, otherImageFile, otherImageComment, videoAspectRatio, videoResolution, allVideoImageFiles, isMultiImageMode]);
 
   const handleSaveCreation = useCallback(async (imageToSave: string) => {
     if (imageToSave && !savedCreations.some(c => c.base64 === imageToSave)) {
@@ -277,7 +313,8 @@ const App: React.FC = () => {
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
         onSave={handleSaveSettings}
-        currentApiKey={apiKey}
+        currentSettings={appSettings}
+        onClearWorkspace={handleClearWorkspace}
       />
       <main className="container mx-auto p-4 md:p-8 flex-grow w-full flex flex-col items-center gap-8">
         <div className="w-full max-w-4xl flex flex-col lg:flex-row gap-8">
@@ -295,7 +332,7 @@ const App: React.FC = () => {
             </div>
             
             <div className="flex flex-col gap-6 p-6 bg-gray-800/50 border border-t-0 border-gray-700 rounded-b-2xl shadow-lg flex-grow">
-              {!apiKey && <ApiKeyBanner />}
+              {!appSettings.apiKey && <ApiKeyBanner />}
               {mode === 'image' && (
                 <>
                   <StyleSelector
@@ -392,7 +429,7 @@ const App: React.FC = () => {
                     </select>
                   </div>
                   
-                  <button onClick={handleImageGenerate} disabled={isImageGenerateDisabled || !apiKey}
+                  <button onClick={handleImageGenerate} disabled={isImageGenerateDisabled || !appSettings.apiKey}
                     className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-purple-600 to-teal-500 text-white font-bold py-4 px-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed hover:from-purple-700 hover:to-teal-600"
                   >
                     <SparklesIcon className="w-6 h-6" />
@@ -501,7 +538,7 @@ const App: React.FC = () => {
                     </div>
                     </div>
                     
-                    <button onClick={handleVideoGenerate} disabled={isVideoGenerateDisabled || !apiKey}
+                    <button onClick={handleVideoGenerate} disabled={isVideoGenerateDisabled || !appSettings.apiKey}
                     className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-teal-600 to-cyan-500 text-white font-bold py-4 px-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed hover:from-teal-700 hover:to-cyan-600"
                     >
                     <VideoCameraIcon className="w-6 h-6" />
