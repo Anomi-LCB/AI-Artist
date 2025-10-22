@@ -1,4 +1,5 @@
-import { GoogleGenAI, Modality, GenerateContentResponse, Part } from "@google/genai";
+
+import { GoogleGenAI, Modality, GenerateContentResponse, Part, AspectRatio, Resolution } from "@google/genai";
 import { ArtStyleId, QualityId } from "../types";
 
 const ARTIST_STYLE_PROMPT = `
@@ -69,14 +70,15 @@ const QUALITY_PROMPTS: { [key in QualityId]: string } = {
 };
 
 
-const getAiClient = () => {
-    if (!process.env.API_KEY) {
-        throw new Error("API_KEY environment variable not set.");
+const getAiClient = (apiKey: string) => {
+    if (!apiKey) {
+        throw new Error("API 키가 제공되지 않았습니다. 설정에서 API 키를 입력해주세요.");
     }
-    return new GoogleGenAI({ apiKey: process.env.API_KEY });
+    return new GoogleGenAI({ apiKey });
 };
 
 export const generateArt = async (
+  apiKey: string,
   userPrompt: string,
   baseImages: { mimeType: string; data: string }[],
   referenceImages: { mimeType: string; data: string }[],
@@ -86,7 +88,7 @@ export const generateArt = async (
   quality: QualityId,
   negativePrompt: string
 ): Promise<string[]> => {
-  const ai = getAiClient();
+  const ai = getAiClient(apiKey);
   
   try {
     let finalPromptText: string;
@@ -222,41 +224,64 @@ export const generateArt = async (
 };
 
 export const generateVideo = async (
+  apiKey: string,
   prompt: string,
   referenceImages: { mimeType: string; data: string }[],
+  aspectRatio: AspectRatio,
+  resolution: Resolution,
   onStatusUpdate: (message: string) => void
 ): Promise<string> => {
   try {
-    // Re-initialize client to ensure latest API key is used
-    const ai = getAiClient();
+    const ai = getAiClient(apiKey);
     onStatusUpdate('비디오 생성을 시작합니다...');
     
     if (referenceImages.length === 0) {
       throw new Error("비디오를 생성하려면 참고 이미지가 최소 1개 이상 필요합니다.");
     }
     
-    const model = 'veo-3.1-generate-preview';
-    const resolution = '720p';
-    const aspectRatio = '16:9';
+    const isMultiImageMode = referenceImages.length > 1;
+
+    const model = isMultiImageMode ? 'veo-3.1-generate-preview' : 'veo-3.1-fast-generate-preview';
+    const finalResolution = isMultiImageMode ? '720p' : resolution;
+    const finalAspectRatio = isMultiImageMode ? '16:9' : aspectRatio;
     
-    const referenceImagesPayload = referenceImages.map(img => ({
+    let operation;
+
+    if (isMultiImageMode) {
+      const referenceImagesPayload = referenceImages.map(img => ({
         image: {
-            imageBytes: img.data,
-            mimeType: img.mimeType,
+          imageBytes: img.data,
+          mimeType: img.mimeType,
         },
         referenceType: 'ASSET',
-    }));
+      }));
 
-    let operation = await ai.models.generateVideos({
-      model: model,
-      prompt: prompt,
-      config: {
-        numberOfVideos: 1,
-        referenceImages: referenceImagesPayload,
-        resolution: resolution,
-        aspectRatio: aspectRatio,
-      }
-    });
+      operation = await ai.models.generateVideos({
+        model: model,
+        prompt: prompt,
+        config: {
+          numberOfVideos: 1,
+          referenceImages: referenceImagesPayload,
+          resolution: finalResolution,
+          aspectRatio: finalAspectRatio,
+        }
+      });
+    } else { // Single image mode
+      const singleImage = referenceImages[0];
+      operation = await ai.models.generateVideos({
+        model: model,
+        prompt: prompt,
+        image: {
+          imageBytes: singleImage.data,
+          mimeType: singleImage.mimeType,
+        },
+        config: {
+          numberOfVideos: 1,
+          resolution: finalResolution,
+          aspectRatio: finalAspectRatio,
+        }
+      });
+    }
 
     onStatusUpdate('모델이 프롬프트를 분석 중입니다...');
     
@@ -287,8 +312,7 @@ export const generateVideo = async (
       throw new Error("생성된 비디오 URI를 찾을 수 없습니다.");
     }
     
-    // The response.body contains the MP4 bytes. You must append an API key when fetching from the download link.
-    const response = await fetch(`${downloadLink}&key=${process.env.API_KEY}`);
+    const response = await fetch(`${downloadLink}&key=${apiKey}`);
     if (!response.ok) {
         throw new Error(`비디오 다운로드 실패: ${response.statusText}`);
     }
@@ -300,7 +324,7 @@ export const generateVideo = async (
     console.error("Error generating video:", error);
     if (error instanceof Error) {
       if (error.message.includes("Requested entity was not found")) {
-        throw new Error("API 키를 찾을 수 없습니다. 키를 다시 선택해주세요.");
+        throw new Error("API 키를 찾을 수 없거나 유효하지 않습니다. 설정에서 키를 확인해주세요.");
       }
       throw new Error(`비디오를 생성하지 못했습니다: ${error.message}`);
     }
