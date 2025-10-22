@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { AppSettings, ArtStyleId, QualityId } from '../types';
 import { artStyleOptions, qualityOptions } from '../constants';
@@ -34,6 +35,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
   
   const handleInputChange = (field: keyof AppSettings, value: string | number) => {
     setLocalSettings(prev => ({...prev, [field]: value}));
+  };
+
+  const handleClearWorkspaceClick = () => {
+    if (window.confirm('정말로 워크스페이스의 모든 창작물을 영구적으로 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.')) {
+      onClearWorkspace();
+    }
   };
 
   return (
@@ -127,7 +134,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
               이 작업은 되돌릴 수 없습니다. 신중하게 진행해주세요.
             </p>
             <button
-              onClick={onClearWorkspace}
+              onClick={handleClearWorkspaceClick}
               className="w-full px-4 py-2 font-bold text-white bg-red-800 rounded-lg hover:bg-red-700 transition-colors border border-red-600"
             >
               워크스페이스 비우기

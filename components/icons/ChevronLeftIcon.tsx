@@ -1,4 +1,3 @@
-
 import React from 'react';
 
 export const ChevronLeftIcon: React.FC<{ className?: string }> = ({ className }) => (
@@ -11,7 +10,7 @@ export const ChevronLeftIcon: React.FC<{ className?: string }> = ({ className })
   >
     <path
       fillRule="evenodd"
-      d="M7.72 12.53a.75.75 0 010-1.06l7.5-7.5a.75.75 0 111.06 1.06L9.31 12l6.97 6.97a.75.75 0 11-1.06 1.06l-7.5-7.5z"
+      d="M13.28 3.97a.75.75 0 010 1.06L6.31 12l6.97 6.97a.75.75 0 11-1.06 1.06l-7.5-7.5a.75.75 0 010-1.06l7.5-7.5a.75.75 0 011.06 0z"
       clipRule="evenodd"
     />
   </svg>

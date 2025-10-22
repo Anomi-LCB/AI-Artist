@@ -1,3 +1,4 @@
+
 import { ArtStyleOption, QualityOption } from './types';
 
 export const inspirationalPrompts: string[] = [
@@ -16,10 +17,10 @@ export const inspirationalPrompts: string[] = [
 export const artStyleOptions: ArtStyleOption[] = [
   { id: '클래식', label: '클래식' },
   { id: '모노크롬 잉크', label: '모노크롬 잉크' },
-  { id: '파스텔 수채화', label: '파스텔 수채화' },
+  { id: '파스텔 수채화', label: '파스텔\n수채화' },
   { id: '우키요에', label: '우키요에' },
   { id: '아르누보', label: '아르누보' },
-  { id: '사이버펑크 글리치', label: '사이버펑크' },
+  { id: '사이버펑크 글리치', label: '사이버\n펑크' },
 ];
 
 export const qualityOptions: QualityOption[] = [

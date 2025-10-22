@@ -13,7 +13,7 @@ export const StyleSelector: React.FC<StyleSelectorProps> = ({ styles, selectedSt
   return (
     <div>
       <label className="block text-lg font-semibold mb-2 text-teal-300">아트 스타일</label>
-      <div className="flex gap-2 overflow-x-auto pb-2">
+      <div className="flex flex-wrap justify-center gap-2">
         {styles.map(style => (
           <StyleCard
             key={style.id}

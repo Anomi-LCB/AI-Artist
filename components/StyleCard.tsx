@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { ArtStyleId } from '../types';
 
@@ -22,7 +23,7 @@ export const StyleCard: React.FC<StyleCardProps> = ({ id, label, isSelected, onC
   const visualClass = styleVisuals[id] || 'from-gray-500 to-gray-700';
 
   const ringClass = isSelected ? 'ring-4 ring-purple-500' : 'ring-2 ring-transparent group-hover:ring-purple-400';
-  const textClass = isSelected ? 'text-white' : 'text-gray-300 group-hover:text-white';
+  const textClass = isSelected ? 'text-white' : 'text-gray-200';
 
   return (
     <button
@@ -31,16 +32,16 @@ export const StyleCard: React.FC<StyleCardProps> = ({ id, label, isSelected, onC
       aria-pressed={isSelected}
       title={id} // Tooltip added to show the full style name (from id)
       className={`
-        group relative flex-shrink-0 w-16 h-20 rounded-lg focus:outline-none 
+        group relative flex-shrink-0 w-14 h-16 rounded-lg focus:outline-none 
         transition-all duration-300 ease-in-out
         disabled:opacity-50 disabled:cursor-not-allowed transform 
         ${ringClass} 
-        ${isSelected ? 'scale-105 -translate-y-1' : 'group-hover:scale-105 group-hover:-translate-y-1'}
+        ${isSelected ? 'scale-105' : 'group-hover:scale-105'}
       `}
     >
       <div className={`absolute inset-0 bg-gradient-to-br ${visualClass} rounded-lg opacity-80 group-hover:opacity-100 transition-opacity duration-300`}></div>
-      <div className="relative w-full h-full flex items-end justify-center p-1 text-center">
-        <span className={`text-xs font-bold leading-tight drop-shadow-md ${textClass}`}>{label}</span>
+      <div className="relative w-full h-full flex items-center justify-center p-1 text-center">
+        <span className={`text-xs font-bold leading-tight drop-shadow-md whitespace-pre-line ${textClass}`}>{label}</span>
       </div>
     </button>
   );

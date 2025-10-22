@@ -11,7 +11,7 @@ export const Header: React.FC<HeaderProps> = ({ onSettingsClick }) => {
   return (
     <header className="relative w-full text-center py-6 md:py-8 border-b border-purple-900/50 bg-gray-900/50 backdrop-blur-sm">
       <div className="flex items-center justify-center gap-4">
-        <SparklesIcon className="w-10 h-10 text-purple-400" />
+        <SparklesIcon className="w-8 h-8 text-purple-400" />
         <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-teal-300">
           AI 캐리커쳐 아티스트
         </h1>

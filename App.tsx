@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback, useEffect } from 'react';
 import { Header } from './components/Header';
 import { ImageInput } from './components/ImageInput';
@@ -109,15 +110,13 @@ const App: React.FC = () => {
   };
 
   const handleClearWorkspace = async () => {
-    if (window.confirm('정말로 워크스페이스의 모든 창작물을 영구적으로 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.')) {
-        try {
-            await clearAllCreations();
-            setSavedCreations([]);
-            setIsSettingsOpen(false); // Close modal on success
-        } catch (err) {
-            console.error("Failed to clear workspace", err);
-            setError("워크스페이스를 비우는 데 실패했습니다.");
-        }
+    try {
+        await clearAllCreations();
+        setSavedCreations([]);
+        setIsSettingsOpen(false); // Close modal on success
+    } catch (err) {
+        console.error("Failed to clear workspace", err);
+        setError("워크스페이스를 비우는 데 실패했습니다.");
     }
   };
 
@@ -344,7 +343,7 @@ const App: React.FC = () => {
                   
                   <div>
                     <label htmlFor="prompt" className="block text-lg font-semibold mb-2 text-teal-300">
-                      {baseImageFiles.length > 0 ? "이미지 수정하기" : "비전 설명하기"}
+                      {baseImageFiles.length > 0 ? "이미지 수정하기" : "프롬프트"}
                     </label>
                     <div className="relative">
                       <textarea
