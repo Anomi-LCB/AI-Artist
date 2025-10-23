@@ -51,6 +51,7 @@ const App: React.FC = () => {
   const [imageAspectRatio, setImageAspectRatio] = useState<ImageAspectRatio>(DEFAULT_SETTINGS.defaultImageAspectRatio);
   const [numOutputs, setNumOutputs] = useState<number>(DEFAULT_SETTINGS.defaultNumOutputs);
   const [generatedImages, setGeneratedImages] = useState<string[]>([]);
+  const [isPromptExpansionEnabled, setIsPromptExpansionEnabled] = useState<boolean>(false);
   const [savedCreations, setSavedCreations] = useState<WorkspaceCreation[]>([]);
 
   // Video Generation State
@@ -215,7 +216,7 @@ const App: React.FC = () => {
         }))
       );
       
-      const results = await generateArt(prompt, baseImageUploads, referenceImageUploads, setLoadingMessage, artStyle, numOutputs, quality, negativePrompt, imageAspectRatio);
+      const results = await generateArt(prompt, baseImageUploads, referenceImageUploads, setLoadingMessage, artStyle, numOutputs, quality, negativePrompt, imageAspectRatio, isPromptExpansionEnabled);
       setGeneratedImages(results);
       
     } catch (err: any) {
@@ -224,7 +225,7 @@ const App: React.FC = () => {
       setIsLoading(false);
       setLoadingMessage('');
     }
-  }, [prompt, baseImageFiles, referenceImageFiles, artStyle, numOutputs, quality, negativePrompt, imageAspectRatio]);
+  }, [prompt, baseImageFiles, referenceImageFiles, artStyle, numOutputs, quality, negativePrompt, imageAspectRatio, isPromptExpansionEnabled]);
   
   const handleVideoGenerate = useCallback(async () => {
     if (!isVeoKeyReady) {
@@ -521,16 +522,36 @@ const App: React.FC = () => {
                             </div>
                         </div>
 
-                        <div>
-                            <label htmlFor="num-outputs" className="block text-sm font-medium text-gray-300 mb-1">생성 개수</label>
-                            <select id="num-outputs" value={numOutputs} onChange={(e) => setNumOutputs(Number(e.target.value))} disabled={isLoading}
-                              className="bg-gray-700 border border-gray-600 rounded-md px-2 py-1 text-sm focus:ring-1 focus:ring-purple-500 disabled:opacity-50"
-                            >
-                              <option value={1}>1</option>
-                              <option value={2}>2</option>
-                              <option value={3}>3</option>
-                              <option value={4}>4</option>
-                            </select>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-start">
+                            <div>
+                                <label htmlFor="num-outputs" className="block text-sm font-medium text-gray-300 mb-1">생성 개수</label>
+                                <select id="num-outputs" value={numOutputs} onChange={(e) => setNumOutputs(Number(e.target.value))} disabled={isLoading}
+                                  className="bg-gray-700 border border-gray-600 rounded-md px-2 py-1 text-sm focus:ring-1 focus:ring-purple-500 disabled:opacity-50"
+                                >
+                                  <option value={1}>1</option>
+                                  <option value={2}>2</option>
+                                  <option value={3}>3</option>
+                                  <option value={4}>4</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-300 mb-1">
+                                  프롬프트 확장
+                                </label>
+                                <label className={`relative inline-flex items-center ${isLoading || !prompt.trim() ? 'cursor-not-allowed' : 'cursor-pointer'}`} title={!prompt.trim() ? "프롬프트를 입력해야 확장을 사용할 수 있습니다." : "AI가 프롬프트를 더 창의적으로 개선합니다."}>
+                                    <input 
+                                        type="checkbox" 
+                                        checked={isPromptExpansionEnabled} 
+                                        onChange={() => setIsPromptExpansionEnabled(!isPromptExpansionEnabled)} 
+                                        className="sr-only peer" 
+                                        disabled={isLoading || !prompt.trim()}
+                                    />
+                                    <div className="w-11 h-6 bg-gray-600 rounded-full peer peer-focus:ring-2 peer-focus:ring-purple-500 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-teal-500 peer-disabled:opacity-50"></div>
+                                </label>
+                                <p className="text-xs text-gray-500 mt-1">
+                                  AI가 프롬프트를 창의적으로 개선합니다.
+                                </p>
+                            </div>
                         </div>
                     </div>
                   </div>

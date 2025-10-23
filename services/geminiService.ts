@@ -79,7 +79,8 @@ export const generateArt = async (
   numOutputs: number,
   quality: QualityId,
   negativePrompt: string,
-  imageAspectRatio: ImageAspectRatio
+  imageAspectRatio: ImageAspectRatio,
+  isPromptExpansionEnabled: boolean
 ): Promise<string[]> => {
   // @ts-ignore
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -91,6 +92,28 @@ export const generateArt = async (
 
     if (useImagenModel) {
         // --- LOGIC FOR IMAGEN MODEL (text or reference images -> new image) ---
+        
+        let finalUserPrompt = userPrompt;
+
+        if (isPromptExpansionEnabled && userPrompt.trim()) {
+            onStatusUpdate("프롬프트를 확장하는 중...");
+            try {
+                const expansionPrompt = `당신은 AI 이미지 생성 모델을 위한 프롬프트 전문가입니다. 다음 사용자의 프롬프트를 받아서, 핵심 주제는 유지하면서도 훨씬 더 생생하고, 예술적이며, 상세한 묘사가 담긴 프롬프트로 확장해주세요. 최종 결과물은 이미지 생성 모델이 잘 이해할 수 있도록 작성되어야 합니다.\n\n# 원본 프롬프트:\n"${userPrompt}"`;
+                const expansionResponse = await ai.models.generateContent({
+                    model: 'gemini-2.5-flash',
+                    contents: expansionPrompt,
+                });
+                
+                const expandedText = expansionResponse.text;
+                if (expandedText && expandedText.trim()) {
+                    finalUserPrompt = expandedText.trim();
+                }
+            } catch (expansionError) {
+                console.warn("Prompt expansion failed:", expansionError);
+                onStatusUpdate("프롬프트 확장에 실패하여 원본으로 진행합니다.");
+            }
+        }
+
 
         let finalPromptText: string;
         const qualityInstruction = QUALITY_PROMPTS[quality] || '';
@@ -119,11 +142,11 @@ export const generateArt = async (
                 throw new Error("참고 이미지를 분석하지 못했습니다.");
             }
             onStatusUpdate("분석을 기반으로 그림을 그리는 중...");
-            finalPromptText = `${ARTIST_STYLE_PROMPT}\n${STYLE_PROMPTS[artStyle] || ''}\n\n**Based on the following analysis of a reference image, create a new illustration in your signature style:**\n"${referenceImageDescription}"\n\n**Incorporate the user's specific instructions:** "${userPrompt || 'Create an image based on the analysis.'}"\n\n**Quality Instructions:** ${qualityInstruction}`;
+            finalPromptText = `${ARTIST_STYLE_PROMPT}\n${STYLE_PROMPTS[artStyle] || ''}\n\n**Based on the following analysis of a reference image, create a new illustration in your signature style:**\n"${referenceImageDescription}"\n\n**Incorporate the user's specific instructions:** "${finalUserPrompt || 'Create an image based on the analysis.'}"\n\n**Quality Instructions:** ${qualityInstruction}`;
         } else {
             // Text prompt only
             onStatusUpdate("프롬프트를 기반으로 그림을 그리는 중...");
-            finalPromptText = `${ARTIST_STYLE_PROMPT}\n${STYLE_PROMPTS[artStyle] || ''}\n\n**User's Request:** "${userPrompt}"\n\n**Quality Instructions:** ${qualityInstruction}`;
+            finalPromptText = `${ARTIST_STYLE_PROMPT}\n${STYLE_PROMPTS[artStyle] || ''}\n\n**User's Request:** "${finalUserPrompt}"\n\n**Quality Instructions:** ${qualityInstruction}`;
         }
         
         if (negativePrompt && negativePrompt.trim()) {
