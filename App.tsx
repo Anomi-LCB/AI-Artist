@@ -501,7 +501,7 @@ const App: React.FC = () => {
                                 <div className="flex gap-2">
                                     {qualityOptions.map(option => (
                                         <SettingButton key={option.id} onClick={() => setQuality(option.id)} disabled={isLoading} active={quality === option.id}>
-                                            {option.label}
+                                            <span className="whitespace-nowrap">{option.label}</span>
                                         </SettingButton>
                                     ))}
                                 </div>
@@ -513,7 +513,7 @@ const App: React.FC = () => {
                                         <SettingButton key={option.id} onClick={() => setImageAspectRatio(option.id)} disabled={isLoading} active={imageAspectRatio === option.id}>
                                             <div className="flex flex-col items-center justify-center leading-tight">
                                                 <span>{option.label.split('\n')[0]}</span>
-                                                <span className="text-xs">{option.label.split('\n')[1]}</span>
+                                                {option.label.split('\n')[1] && <span className="text-xs">{option.label.split('\n')[1]}</span>}
                                             </div>
                                         </SettingButton>
                                     ))}

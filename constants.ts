@@ -1,4 +1,5 @@
 
+
 import { ArtStyleOption, QualityOption, ImageAspectRatioOption } from './types';
 
 export const inspirationalPrompts: string[] = [
@@ -29,7 +30,7 @@ export const qualityOptions: QualityOption[] = [
 ];
 
 export const imageAspectRatioOptions: ImageAspectRatioOption[] = [
-  { id: '1:1', label: '1:1\n(정방형)' },
+  { id: '1:1', label: '1:1' },
   { id: '16:9', label: '16:9\n(가로)' },
   { id: '9:16', label: '9:16\n(세로)' },
 ];

@@ -60,11 +60,11 @@ export const Workspace: React.FC<WorkspaceProps> = ({ userName, creations, onSel
       <h2 className="text-2xl font-bold mb-4 text-teal-300">{userName}님의 워크스페이스</h2>
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
         {creations.map((creation) => (
-          <div key={creation.id} className="relative group aspect-square">
+          <div key={creation.id} className="relative group bg-gray-900/50 rounded-lg flex items-center justify-center">
             <img
               src={`data:image/png;base64,${creation.base64}`}
               alt={`생성된 아트 ${creation.id}`}
-              className="w-full h-full object-cover rounded-lg border-2 border-gray-600 group-hover:border-purple-400 transition-all"
+              className="w-full h-full object-contain rounded-lg border-2 border-transparent group-hover:border-purple-400 transition-all max-h-48"
             />
             <div className="absolute inset-0 bg-black/70 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
               <div className="absolute top-2 right-2">

@@ -1,4 +1,5 @@
 
+
 import { GoogleGenAI, Modality, GenerateContentResponse, Part, AspectRatio, Resolution } from "@google/genai";
 import { ArtStyleId, QualityId, ImageAspectRatio } from "../types";
 
@@ -84,130 +85,169 @@ export const generateArt = async (
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   try {
-    let finalPromptText: string;
-    const finalArtistPrompt = ARTIST_STYLE_PROMPT + (STYLE_PROMPTS[artStyle] || '');
-    const qualityInstruction = QUALITY_PROMPTS[quality] || '';
-    const aspectRatioInstruction = `\n\n**Aspect Ratio:** Please generate the image with a ${imageAspectRatio} aspect ratio.`;
-    let finalPromptParts: Part[] = [];
+    const useImagenModel = baseImages.length === 0;
 
-    // Case 1: Base images are provided for direct modification/remake.
-    if (baseImages.length > 0) {
-      if (referenceImages.length > 0) {
-        onStatusUpdate("이미지들을 조합하여 그림을 그리는 중...");
-        finalPromptText = `${finalArtistPrompt}\n\n**Task:** Redraw the **base image(s)** (the first image(s) provided) by incorporating the style, mood, and elements from the **reference images** (all subsequent images).\n\n**User's Instructions:** "${userPrompt || 'Combine them creatively.'}"\n\n**Quality Instructions:** ${qualityInstruction}${aspectRatioInstruction}`;
-        finalPromptParts.push({ text: finalPromptText });
-        baseImages.forEach(img => finalPromptParts.push({ inlineData: img }));
-        referenceImages.forEach(img => finalPromptParts.push({ inlineData: img }));
-      } else {
-        onStatusUpdate("이미지를 수정하는 중...");
-        finalPromptText = `**Task:** You are an expert image editor. Edit the provided image based on the user's specific instructions. The output should be a modified version of the original image. Only if no specific edit instruction is given, redraw the image in your signature style.
+    onStatusUpdate(numOutputs > 1 ? `${numOutputs}개의 이미지를 생성하는 중...` : '이미지 생성 중...');
 
-**Your Signature Style (use if redrawing):**\n${finalArtistPrompt}
+    if (useImagenModel) {
+        // --- LOGIC FOR IMAGEN MODEL (text or reference images -> new image) ---
 
-**User's Editing Instructions:** "${userPrompt}"
+        let finalPromptText: string;
+        const qualityInstruction = QUALITY_PROMPTS[quality] || '';
+        let referenceImageDescription = '';
 
-**Quality Instructions:** ${qualityInstruction}${aspectRatioInstruction}`;
-        finalPromptParts.push({ text: finalPromptText });
-        baseImages.forEach(img => finalPromptParts.push({ inlineData: img }));
-      }
-      
-      if (negativePrompt && negativePrompt.trim()) {
-        const negativePromptText = `\n\n**Negative Prompt (Crucial Exclusion):** Under no circumstances should the final image contain any of the following elements or concepts: "${negativePrompt.trim()}". The artist must strictly avoid these.`;
-        (finalPromptParts[0] as { text: string }).text += negativePromptText;
-      }
-    // Case 2: No base images, but reference images are provided for inspiration.
-    } else if (referenceImages.length > 0) {
-      onStatusUpdate("이미지를 분석하는 중...");
-      
-      const analysisPromptText = `당신은 미술 분석 전문가입니다. 제공된 이미지를 깊이 있고 다층적으로 분석하세요. 이미지의 핵심 본질을 파악하기 위해 재귀적으로 해체해야 합니다.
+        if (referenceImages.length > 0) {
+            onStatusUpdate("참고 이미지를 분석하는 중...");
+            const analysisPromptText = `당신은 미술 분석 전문가입니다. 제공된 이미지를 깊이 있고 다층적으로 분석하세요. 이미지의 핵심 본질을 파악하기 위해 재귀적으로 해체해야 합니다.
 1. **감정의 핵과 서사:** 이미지가 전달하려는 핵심적인 감정이나 이야기는 무엇입니까? 인물의 표정, 몸짓, 그리고 주변 환경과의 상호작용을 분석하여 서사를 파악하세요. 중심 주제는 무엇인가요?
 2. **분위기와 무드:** 전체적인 분위기(예: 우울함, 기쁨, 긴장감, 평온함)를 묘사하세요. 이러한 무드는 어떻게 만들어지고 있나요?
 3. **색채와 빛 분석:** 사용된 색상 팔레트를 분석하세요. 주조색은 무엇이며, 이 색들이 주는 심리적 효과는 무엇입니까? 빛의 사용(예: 부드러운, 거친, 극적인 조명)이 분위기와 초점을 만드는 데 어떻게 기여하고 있나요?
 4. **구도와 역동성:** 구성을 세밀하게 분석하세요. 초점은 어디에 있습니까? 선, 형태, 균형이 감상자의 시선을 어떻게 유도하며 이미지의 에너지에 기여하나요?
 5. **종합:** 위의 모든 분석을 종합하여, 이미지를 완벽하게 설명하는 글을 작성하세요. 이 설명은 단순히 이미지에 '무엇이 있는지'를 넘어, 감정적이고 주제적인 차원에서 '무엇을 표현하려 하는지'를 포착해야 합니다. 이 분석은 다른 아티스트가 이미지의 형태뿐만 아니라 그 영혼까지 재창조하는 데 사용될 것입니다.`;
 
-      const analysisPromptParts: Part[] = [
-        ...referenceImages.map(image => ({ inlineData: image })),
-        { text: analysisPromptText }
-      ];
-      
-      const analysisResponse = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: { parts: analysisPromptParts },
-      });
+            const analysisResponse = await ai.models.generateContent({
+                model: 'gemini-2.5-flash',
+                contents: { parts: [
+                    ...referenceImages.map(image => ({ inlineData: image })),
+                    { text: analysisPromptText }
+                ]},
+            });
+            
+            referenceImageDescription = analysisResponse.text;
 
-      const imageDescription = analysisResponse.text;
-      
-      if (!imageDescription) {
-          throw new Error("이미지를 분석하지 못했습니다.");
-      }
-      
-      onStatusUpdate("분석을 기반으로 그림을 그리는 중...");
-
-      finalPromptText = `${finalArtistPrompt}\n\n**Based on the following analysis of a reference image, create a new illustration from scratch in your signature style:**\n"${imageDescription}"\n\n**Incorporate the user's specific instructions:** "${userPrompt || 'Create an image based on the analysis.'}"\n\n**Quality Instructions:** ${qualityInstruction}${aspectRatioInstruction}`;
-      
-      if (negativePrompt && negativePrompt.trim()) {
-        finalPromptText += `\n\n**Negative Prompt (Crucial Exclusion):** Under no circumstances should the final image contain any of the following elements or concepts: "${negativePrompt.trim()}". The artist must strictly avoid these.`;
-      }
-      
-      finalPromptParts.push({ text: finalPromptText });
-
-    // Case 3: Text prompt only.
-    } else {
-        onStatusUpdate("프롬프트를 기반으로 그림을 그리는 중...");
-        finalPromptText = `${finalArtistPrompt}\n\n**User's Request:** "${userPrompt}"\n\n**Quality Instructions:** ${qualityInstruction}${aspectRatioInstruction}`;
+            if (!referenceImageDescription) {
+                throw new Error("참고 이미지를 분석하지 못했습니다.");
+            }
+            onStatusUpdate("분석을 기반으로 그림을 그리는 중...");
+            finalPromptText = `${ARTIST_STYLE_PROMPT}\n${STYLE_PROMPTS[artStyle] || ''}\n\n**Based on the following analysis of a reference image, create a new illustration in your signature style:**\n"${referenceImageDescription}"\n\n**Incorporate the user's specific instructions:** "${userPrompt || 'Create an image based on the analysis.'}"\n\n**Quality Instructions:** ${qualityInstruction}`;
+        } else {
+            // Text prompt only
+            onStatusUpdate("프롬프트를 기반으로 그림을 그리는 중...");
+            finalPromptText = `${ARTIST_STYLE_PROMPT}\n${STYLE_PROMPTS[artStyle] || ''}\n\n**User's Request:** "${userPrompt}"\n\n**Quality Instructions:** ${qualityInstruction}`;
+        }
         
         if (negativePrompt && negativePrompt.trim()) {
-          finalPromptText += `\n\n**Negative Prompt (Crucial Exclusion):** Under no circumstances should the final image contain any of the following elements or concepts: "${negativePrompt.trim()}". The artist must strictly avoid these.`;
+            finalPromptText += `\n\n**Negative Prompt (Crucial Exclusion):** Under no circumstances should the final image contain any of the following elements or concepts: "${negativePrompt.trim()}". The artist must strictly avoid these.`;
         }
 
-        finalPromptParts.push({ text: finalPromptText });
-    }
-  
-    onStatusUpdate(numOutputs > 1 ? `${numOutputs}개의 이미지를 생성하는 중...` : '이미지 생성 중...');
-    
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-image',
-      contents: {
-        parts: finalPromptParts,
-      },
-      config: {
-        responseModalities: [Modality.IMAGE],
-        candidateCount: numOutputs,
-      },
-    });
-    
-    if (!response.candidates || response.candidates.length === 0) {
-        const blockReason = response.promptFeedback?.blockReason;
-        if (blockReason) {
-            throw new Error(`요청이 차단되었습니다 (${blockReason}). 프롬프트를 수정해 보세요.`);
+        const generationPromises = [];
+        for (let i = 0; i < numOutputs; i++) {
+            generationPromises.push(
+                ai.models.generateImages({
+                    model: 'imagen-4.0-generate-001',
+                    prompt: finalPromptText,
+                    config: {
+                        numberOfImages: 1,
+                        outputMimeType: 'image/png',
+                        aspectRatio: imageAspectRatio,
+                    },
+                })
+            );
         }
-        throw new Error("API에서 응답 후보를 받지 못했습니다. 요청이 차단되었을 수 있습니다.");
-    }
-    
-    const results = response.candidates
-      .map(candidate => {
-        if (candidate.finishReason && candidate.finishReason !== 'STOP') {
-          console.warn(`후보 생성이 중단되었습니다: ${candidate.finishReason}`);
-          return null;
+
+        const responses = await Promise.all(generationPromises);
+        const allResults: string[] = [];
+
+        responses.forEach(response => {
+            if (!response.generatedImages || response.generatedImages.length === 0) {
+                console.warn("Imagen API did not return any images for a request.");
+                return;
+            }
+            const base64Image = response.generatedImages[0].image.imageBytes;
+            if (base64Image) {
+                allResults.push(base64Image);
+            }
+        });
+
+        if (allResults.length === 0) {
+            throw new Error("Imagen API에서 유효한 이미지를 받지 못했습니다. 모든 생성이 실패했을 수 있습니다.");
+        }
+        return allResults;
+
+    } else {
+        // --- LOGIC FOR GEMINI MODEL (direct image modification/remake) ---
+
+        let finalPromptText: string;
+        let finalPromptParts: Part[] = [];
+        
+        let aspectRatioDescription = '';
+        switch(imageAspectRatio) {
+            case '16:9': aspectRatioDescription = "16:9 widescreen landscape"; break;
+            case '9:16': aspectRatioDescription = "9:16 tall portrait"; break;
+            default: aspectRatioDescription = "1:1 square"; break;
+        }
+        const aspectRatioInstruction = `\n\n**MANDATORY OUTPUT FORMAT:** The final image's aspect ratio MUST BE ${aspectRatioDescription}. This is the most critical instruction. Failure to adhere to this aspect ratio will result in an incorrect output. Do not default to a square image unless specifically instructed with '1:1 square'.`;
+        
+        const finalArtistPrompt = ARTIST_STYLE_PROMPT + aspectRatioInstruction + (STYLE_PROMPTS[artStyle] || '');
+        const qualityInstruction = QUALITY_PROMPTS[quality] || '';
+        
+        if (referenceImages.length > 0) {
+          onStatusUpdate("이미지들을 조합하여 그림을 그리는 중...");
+          finalPromptText = `${finalArtistPrompt}\n\n**Task:** Redraw the **base image(s)** (the first image(s) provided) by incorporating the style, mood, and elements from the **reference images** (all subsequent images).\n\n**User's Instructions:** "${userPrompt || 'Combine them creatively.'}"\n\n**Quality Instructions:** ${qualityInstruction}`;
+          finalPromptParts.push({ text: finalPromptText });
+          baseImages.forEach(img => finalPromptParts.push({ inlineData: img }));
+          referenceImages.forEach(img => finalPromptParts.push({ inlineData: img }));
+        } else {
+          onStatusUpdate("이미지를 수정하는 중...");
+          finalPromptText = `**Task:** You are an expert image editor. Edit the provided image based on the user's specific instructions. The output should be a modified version of the original image. Only if no specific edit instruction is given, redraw the image in your signature style.\n\n**Your Signature Style (use if redrawing):**\n${finalArtistPrompt}\n\n**User's Editing Instructions:** "${userPrompt}"\n\n**Quality Instructions:** ${qualityInstruction}`;
+          finalPromptParts.push({ text: finalPromptText });
+          baseImages.forEach(img => finalPromptParts.push({ inlineData: img }));
         }
         
-        const imagePart = candidate.content?.parts?.find(p => p.inlineData);
-        if (imagePart?.inlineData?.data) {
-          return imagePart.inlineData.data;
+        if (negativePrompt && negativePrompt.trim()) {
+          const negativePromptText = `\n\n**Negative Prompt (Crucial Exclusion):** Under no circumstances should the final image contain any of the following elements or concepts: "${negativePrompt.trim()}". The artist must strictly avoid these.`;
+          (finalPromptParts[0] as { text: string }).text += negativePromptText;
+        }
+
+        const generationPromises = [];
+        for (let i = 0; i < numOutputs; i++) {
+            generationPromises.push(
+                ai.models.generateContent({
+                    model: 'gemini-2.5-flash-image',
+                    contents: { parts: finalPromptParts },
+                    config: { responseModalities: [Modality.IMAGE] },
+                })
+            );
+        }
+
+        const responses = await Promise.all(generationPromises);
+        const allResults: string[] = [];
+
+        responses.forEach(response => {
+            if (!response.candidates || response.candidates.length === 0) {
+                const blockReason = response.promptFeedback?.blockReason;
+                if (blockReason) {
+                    console.warn(`하나의 이미지 생성이 차단되었습니다 (${blockReason}).`);
+                } else {
+                    console.warn("API에서 응답 후보를 받지 못했습니다. 요청이 차단되었을 수 있습니다.");
+                }
+                return;
+            }
+
+            const resultsFromCandidate = response.candidates
+                .map(candidate => {
+                    if (candidate.finishReason && candidate.finishReason !== 'STOP') {
+                        console.warn(`후보 생성이 중단되었습니다: ${candidate.finishReason}`);
+                        return null;
+                    }
+                    const imagePart = candidate.content?.parts?.find(p => p.inlineData);
+                    if (imagePart?.inlineData?.data) {
+                        return imagePart.inlineData.data;
+                    }
+                    console.error("후보에서 이미지 데이터를 찾지 못했습니다:", JSON.stringify(candidate, null, 2));
+                    return null;
+                })
+                .filter((data): data is string => data !== null);
+
+            allResults.push(...resultsFromCandidate);
+        });
+
+        if (allResults.length === 0) {
+            throw new Error("API에서 유효한 이미지를 받지 못했습니다. 모든 생성이 실패했거나 예상치 못한 응답 형식이 반환되었습니다.");
         }
         
-        console.error("후보에서 이미지 데이터를 찾지 못했습니다:", JSON.stringify(candidate, null, 2));
-        return null;
-      })
-      .filter((data): data is string => data !== null);
-
-    if (results.length === 0) {
-      throw new Error("API에서 유효한 이미지를 받지 못했습니다. 모든 생성이 실패했거나 예상치 못한 응답 형식이 반환되었습니다.");
+        return allResults;
     }
-    
-    return results;
-
   } catch (error) {
     console.error("Error generating art:", error);
      if (error instanceof Error) {
