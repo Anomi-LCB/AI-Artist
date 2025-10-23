@@ -22,6 +22,7 @@ export interface ImageAspectRatioOption {
 export interface WorkspaceCreation {
   id: number;
   base64: string;
+  type: 'image' | 'video';
   createdAt: Date;
 }
 

@@ -23,3 +23,15 @@ export const base64ToFile = (base64: string, filename: string, mimeType: string)
     .then(res => res.blob())
     .then(blob => new File([blob], filename, { type: mimeType }));
 };
+
+export const blobToBase64 = (blob: Blob): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(blob);
+    reader.onload = () => {
+      // The result is a data URL like "data:video/mp4;base64,AAAAFGZ0eX...".
+      // We need to return the full data URL for videos to be playable in the workspace and lightbox.
+      resolve(reader.result as string);
+    };
+    reader.onerror = (error) => reject(error);
+  });

@@ -10,6 +10,7 @@ interface ArtDisplayProps {
   error: string | null;
   loadingMessage: string;
   onSave: (image: string) => void;
+  onImageClick: (image: string) => void;
 }
 
 const LoadingSpinner: React.FC<{ message: string }> = ({ message }) => (
@@ -19,7 +20,7 @@ const LoadingSpinner: React.FC<{ message: string }> = ({ message }) => (
     </div>
 );
 
-export const ArtDisplay: React.FC<ArtDisplayProps> = ({ images, isLoading, error, loadingMessage, onSave }) => {
+export const ArtDisplay: React.FC<ArtDisplayProps> = ({ images, isLoading, error, loadingMessage, onSave, onImageClick }) => {
   const [selectedIndex, setSelectedIndex] = useState(0);
 
   useEffect(() => {
@@ -61,28 +62,32 @@ export const ArtDisplay: React.FC<ArtDisplayProps> = ({ images, isLoading, error
         ) : hasContent ? (
           <div className={`w-full grid gap-4 ${images.length > 1 ? 'grid-cols-2 items-start' : 'grid-cols-1'}`}>
             {images.map((image, index) => (
-              <button
-                key={index}
-                onClick={() => setSelectedIndex(index)}
-                className={`relative rounded-lg overflow-hidden focus:outline-none transition-all duration-300 ${
-                  selectedIndex === index 
-                    ? 'ring-4 ring-purple-500 shadow-lg' 
-                    : 'ring-2 ring-transparent hover:ring-purple-400'
-                }`}
-              >
-                <img
-                  src={`data:image/png;base64,${image}`}
-                  alt={`생성된 아트 ${index + 1}`}
-                  className="w-full h-auto object-contain"
-                />
-                 {selectedIndex === index && images.length > 1 && (
-                    <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-                        <div className="text-white text-lg font-bold bg-purple-600/80 px-4 py-2 rounded-full">
-                            선택됨
-                        </div>
-                    </div>
+              <div key={index} className="relative group">
+                <button
+                  onClick={() => onImageClick(image)}
+                  className={`w-full block rounded-lg overflow-hidden focus:outline-none transition-all duration-300`}
+                >
+                  <img
+                    src={`data:image/png;base64,${image}`}
+                    alt={`생성된 아트 ${index + 1}`}
+                    className="w-full h-auto object-contain"
+                  />
+                </button>
+                 {images.length > 1 && (
+                    <button 
+                      onClick={() => setSelectedIndex(index)}
+                      className={`absolute top-2 left-2 flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full transition-colors duration-300
+                        ${selectedIndex === index 
+                          ? 'bg-purple-600 text-white shadow-md' 
+                          : 'bg-gray-800/70 text-gray-300 hover:bg-gray-700'
+                        }`
+                      }
+                    >
+                       <span className={`w-2.5 h-2.5 rounded-full border-2 ${selectedIndex === index ? 'border-white bg-purple-400' : 'border-gray-500'}`}></span>
+                       선택
+                    </button>
                 )}
-              </button>
+              </div>
             ))}
           </div>
         ) : (

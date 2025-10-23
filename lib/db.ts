@@ -26,12 +26,12 @@ const openDB = (): Promise<IDBDatabase> => {
   });
 };
 
-export const addCreation = async (base64: string): Promise<void> => {
+export const addCreation = async (base64: string, type: 'image' | 'video'): Promise<void> => {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(STORE_NAME, 'readwrite');
     const store = transaction.objectStore(STORE_NAME);
-    const newCreation = { base64, createdAt: new Date() };
+    const newCreation = { base64, type, createdAt: new Date() };
     const request = store.add(newCreation);
 
     request.onsuccess = () => resolve();

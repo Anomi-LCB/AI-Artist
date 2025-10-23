@@ -1,6 +1,6 @@
 
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useReducer } from 'react';
 import { Header } from './components/Header';
 import { ImageInput } from './components/ImageInput';
 import { ArtDisplay } from './components/ArtDisplay';
@@ -8,11 +8,13 @@ import { VideoDisplay } from './components/VideoDisplay';
 import { SparklesIcon } from './components/icons/SparklesIcon';
 import { PhotoIcon } from './components/icons/PhotoIcon';
 import { VideoCameraIcon } from './components/icons/VideoCameraIcon';
-import { generateArt, generateVideo } from './services/geminiService';
-import { fileToBase64, base64ToFile } from './utils/fileUtils';
+import { UndoIcon } from './components/icons/UndoIcon';
+import { generateArt, generateVideo, expandPrompt } from './services/geminiService';
+import { fileToBase64, base64ToFile, blobToBase64 } from './utils/fileUtils';
 import { Workspace } from './components/Workspace';
 import { StyleSelector } from './components/StyleSelector';
 import { SettingsModal } from './components/SettingsModal';
+import { Lightbox } from './components/Lightbox';
 import { ArtStyleId, QualityId, WorkspaceCreation, AspectRatio, Resolution, AppSettings, ImageAspectRatio } from './types';
 import { artStyleOptions, qualityOptions, inspirationalPrompts, imageAspectRatioOptions } from './constants';
 import { getAllCreations, addCreation, deleteCreation, clearAllCreations } from './lib/db';
@@ -30,6 +32,45 @@ const DEFAULT_SETTINGS: AppSettings = {
   defaultImageAspectRatio: '1:1',
 };
 
+// Reducer for image generation state
+interface ImageGenState {
+  prompt: string;
+  originalPrompt: string; // To store prompt before expansion
+  negativePrompt: string;
+  artStyle: ArtStyleId;
+  quality: QualityId;
+  imageAspectRatio: ImageAspectRatio;
+  numOutputs: number;
+  isPromptExpansionEnabled: boolean;
+}
+
+type ImageGenAction =
+  | { type: 'SET_FIELD'; field: keyof ImageGenState; value: any }
+  | { type: 'SET_PROMPT_EXPANSION'; prompt: string; originalPrompt: string }
+  | { type: 'REVERT_PROMPT' }
+  | { type: 'RESET_TO_DEFAULTS'; defaults: AppSettings };
+
+const imageGenerationReducer = (state: ImageGenState, action: ImageGenAction): ImageGenState => {
+  switch (action.type) {
+    case 'SET_FIELD':
+      return { ...state, [action.field]: action.value };
+    case 'SET_PROMPT_EXPANSION':
+      return { ...state, prompt: action.prompt, originalPrompt: action.originalPrompt };
+    case 'REVERT_PROMPT':
+        return { ...state, prompt: state.originalPrompt, originalPrompt: '' };
+    case 'RESET_TO_DEFAULTS':
+      return {
+        ...state,
+        artStyle: action.defaults.defaultArtStyle,
+        quality: action.defaults.defaultQuality,
+        numOutputs: action.defaults.defaultNumOutputs,
+        imageAspectRatio: action.defaults.defaultImageAspectRatio,
+      };
+    default:
+      return state;
+  }
+};
+
 const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [userName, setUserName] = useState<string>('');
@@ -42,19 +83,25 @@ const App: React.FC = () => {
   const [loadingMessage, setLoadingMessage] = useState<string>('');
   const [appSettings, setAppSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [lightboxContent, setLightboxContent] = useState<WorkspaceCreation | null>(null);
 
-  // Image Generation State
-  const [prompt, setPrompt] = useState<string>('');
-  const [negativePrompt, setNegativePrompt] = useState<string>('');
+  // Image Generation State (managed by reducer)
+  const initialImageGenState: ImageGenState = {
+    prompt: '',
+    originalPrompt: '',
+    negativePrompt: '',
+    artStyle: DEFAULT_SETTINGS.defaultArtStyle,
+    quality: DEFAULT_SETTINGS.defaultQuality,
+    imageAspectRatio: DEFAULT_SETTINGS.defaultImageAspectRatio,
+    numOutputs: DEFAULT_SETTINGS.defaultNumOutputs,
+    isPromptExpansionEnabled: false,
+  };
+  const [imageGenState, dispatchImageGenState] = useReducer(imageGenerationReducer, initialImageGenState);
+  
   const [baseImageFiles, setBaseImageFiles] = useState<File[]>([]);
   const [isBaseImageHighlighted, setIsBaseImageHighlighted] = useState<boolean>(false);
   const [referenceImageFiles, setReferenceImageFiles] = useState<File[]>([]);
-  const [artStyle, setArtStyle] = useState<ArtStyleId>(DEFAULT_SETTINGS.defaultArtStyle);
-  const [quality, setQuality] = useState<QualityId>(DEFAULT_SETTINGS.defaultQuality);
-  const [imageAspectRatio, setImageAspectRatio] = useState<ImageAspectRatio>(DEFAULT_SETTINGS.defaultImageAspectRatio);
-  const [numOutputs, setNumOutputs] = useState<number>(DEFAULT_SETTINGS.defaultNumOutputs);
   const [generatedImages, setGeneratedImages] = useState<string[]>([]);
-  const [isPromptExpansionEnabled, setIsPromptExpansionEnabled] = useState<boolean>(false);
   const [savedCreations, setSavedCreations] = useState<WorkspaceCreation[]>([]);
 
   // Video Generation State
@@ -135,10 +182,7 @@ const App: React.FC = () => {
           const savedSettings = JSON.parse(savedSettingsString) as AppSettings;
           setAppSettings(savedSettings);
           // Apply loaded settings to state
-          setArtStyle(savedSettings.defaultArtStyle);
-          setQuality(savedSettings.defaultQuality);
-          setNumOutputs(savedSettings.defaultNumOutputs);
-          setImageAspectRatio(savedSettings.defaultImageAspectRatio || DEFAULT_SETTINGS.defaultImageAspectRatio);
+          dispatchImageGenState({ type: 'RESET_TO_DEFAULTS', defaults: savedSettings });
         }
       } catch (err) {
         console.error("Failed to load settings from LocalStorage", err);
@@ -160,11 +204,7 @@ const App: React.FC = () => {
   
   const handleSaveSettings = (newSettings: AppSettings) => {
     setAppSettings(newSettings);
-    // Apply new default settings to the current state if they haven't been changed by the user
-    setArtStyle(newSettings.defaultArtStyle);
-    setQuality(newSettings.defaultQuality);
-    setNumOutputs(newSettings.defaultNumOutputs);
-    setImageAspectRatio(newSettings.defaultImageAspectRatio);
+    dispatchImageGenState({ type: 'RESET_TO_DEFAULTS', defaults: newSettings });
     localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(newSettings));
   };
 
@@ -203,14 +243,28 @@ const App: React.FC = () => {
   const handleInspireMe = useCallback(() => {
     const randomPrompt = inspirationalPrompts[Math.floor(Math.random() * inspirationalPrompts.length)];
     if (mode === 'image') {
-      setPrompt(randomPrompt);
+      dispatchImageGenState({ type: 'SET_FIELD', field: 'prompt', value: randomPrompt });
     } else {
       setVideoPrompt(randomPrompt)
     }
   }, [mode]);
 
+  const handlePromptExpansion = useCallback(async () => {
+    if (!imageGenState.prompt.trim()) return;
+    setError(null);
+    setIsLoading(true);
+    try {
+        const expanded = await expandPrompt(imageGenState.prompt, setLoadingMessage);
+        dispatchImageGenState({ type: 'SET_PROMPT_EXPANSION', prompt: expanded, originalPrompt: imageGenState.prompt });
+    } catch(err) {
+        // Error is handled inside expandPrompt
+    } finally {
+        setIsLoading(false);
+    }
+  }, [imageGenState.prompt]);
+
   const handleImageGenerate = useCallback(async () => {
-    if (!prompt.trim() && baseImageFiles.length === 0 && referenceImageFiles.length === 0) {
+    if (!imageGenState.prompt.trim() && baseImageFiles.length === 0 && referenceImageFiles.length === 0) {
       setError('프롬프트를 입력하거나 이미지를 업로드해주세요.');
       return;
     }
@@ -236,7 +290,7 @@ const App: React.FC = () => {
         }))
       );
       
-      const results = await generateArt(prompt, baseImageUploads, referenceImageUploads, setLoadingMessage, artStyle, numOutputs, quality, negativePrompt, imageAspectRatio, isPromptExpansionEnabled);
+      const results = await generateArt(imageGenState.prompt, baseImageUploads, referenceImageUploads, setLoadingMessage, imageGenState.artStyle, imageGenState.numOutputs, imageGenState.quality, imageGenState.negativePrompt, imageGenState.imageAspectRatio);
       setGeneratedImages(results);
       
     } catch (err: any) {
@@ -245,7 +299,7 @@ const App: React.FC = () => {
       setIsLoading(false);
       setLoadingMessage('');
     }
-  }, [prompt, baseImageFiles, referenceImageFiles, artStyle, numOutputs, quality, negativePrompt, imageAspectRatio, isPromptExpansionEnabled]);
+  }, [imageGenState, baseImageFiles, referenceImageFiles]);
   
   const handleVideoGenerate = useCallback(async () => {
     if (!isVeoKeyReady) {
@@ -272,23 +326,27 @@ const App: React.FC = () => {
         
         let finalPrompt: string;
         if (isMultiImageMode) {
-            let promptSegments = [];
-            if (characterImageFile.length > 0) promptSegments.push("featuring the provided character image(s) as the main character");
-            if (backgroundImageFile.length > 0) promptSegments.push("set within the provided background image(s)");
-            if (otherImageFile.length > 0) {
-                const comment = otherImageComment.trim() ? ` (noted as: '${otherImageComment.trim()}')` : '';
-                promptSegments.push(`utilizing elements from the other provided image(s)${comment}`);
-            }
+          let promptSegments: string[] = [];
+          if (characterImageFile.length > 0) promptSegments.push("featuring the provided character image(s) as the main character");
+          if (backgroundImageFile.length > 0) promptSegments.push("set within the provided background image(s)");
+          if (otherImageFile.length > 0) {
+              const comment = otherImageComment.trim() ? ` (noted as: '${otherImageComment.trim()}')` : '';
+              promptSegments.push(`utilizing elements from the other provided image(s)${comment}`);
+          }
 
-            const prefix = promptSegments.length > 0 ? `Using the provided images, create a video ${promptSegments.join(', ')}. ` : '';
-            const userScenario = videoPrompt || 'Animate these images together creatively.';
-            finalPrompt = `${prefix}The video should follow this scenario: "${userScenario}"`;
+          const imageDescription = promptSegments.length > 0
+            ? `Animate a video based on the provided images: a character, a background, and other elements. `
+            : '';
+          const userScenario = videoPrompt || 'Animate these images together creatively.';
+          finalPrompt = `${imageDescription}The video's narrative should follow this scenario: "${userScenario}"`;
         } else {
             finalPrompt = videoPrompt || 'Bring this image to life.';
         }
 
-        const resultUrl = await generateVideo(finalPrompt, imageUploads, videoAspectRatio, videoResolution, setLoadingMessage);
-        setGeneratedVideoUrl(resultUrl);
+        const resultBlob = await generateVideo(finalPrompt, imageUploads, videoAspectRatio, videoResolution, setLoadingMessage);
+        const videoDataUrl = URL.createObjectURL(resultBlob);
+        setGeneratedVideoUrl(videoDataUrl);
+        await handleSaveCreation(resultBlob, 'video');
 
     } catch (err: any) {
         if (err.message.includes("다른 키를 선택해주세요")) {
@@ -301,17 +359,24 @@ const App: React.FC = () => {
     }
   }, [videoPrompt, backgroundImageFile, characterImageFile, otherImageFile, otherImageComment, videoAspectRatio, videoResolution, allVideoImageFiles, isMultiImageMode, isVeoKeyReady]);
 
-  const handleSaveCreation = useCallback(async (imageToSave: string) => {
-    if (imageToSave && !savedCreations.some(c => c.base64 === imageToSave)) {
+  const handleSaveCreation = useCallback(async (data: string | Blob, type: 'image' | 'video') => {
       try {
-        await addCreation(imageToSave);
+        let base64Data: string;
+        if (type === 'image') {
+            base64Data = data as string;
+            // Prevent duplicate image saves
+            if (savedCreations.some(c => c.type === 'image' && c.base64 === base64Data)) return;
+            base64Data = `data:image/png;base64,${base64Data}`;
+        } else {
+            base64Data = await blobToBase64(data as Blob);
+        }
+        await addCreation(base64Data, type);
         const updatedCreations = await getAllCreations(); // Re-fetch to get the new item with its ID
         setSavedCreations(updatedCreations);
       } catch (err) {
         console.error("Failed to save creation to IndexedDB", err);
         setError("워크스페이스에 저장하지 못했습니다.");
       }
-    }
   }, [savedCreations]);
 
   const handleDeleteCreation = useCallback(async (idToDelete: number) => {
@@ -327,11 +392,12 @@ const App: React.FC = () => {
   const handleSelectForEditing = useCallback(async (base64: string) => {
     try {
         setMode('image');
-        const file = await base64ToFile(base64, `editing-${Date.now()}.png`, 'image/png');
+        // The base64 from workspace will be a data URL, need to convert it to a file
+        const file = await base64ToFile(base64.split(',')[1], `editing-${Date.now()}.png`, 'image/png');
         setBaseImageFiles([file]);
         setIsBaseImageHighlighted(true);
         setReferenceImageFiles([]);
-        setPrompt(''); // Clear prompt for new editing instructions
+        dispatchImageGenState({ type: 'SET_FIELD', field: 'prompt', value: '' }); // Clear prompt for new editing instructions
         setGeneratedImages([]); // Clear previous generation
         setError(null);
         window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -353,7 +419,7 @@ const App: React.FC = () => {
     }
   };
 
-  const isImageGenerateDisabled = isLoading || (!prompt.trim() && baseImageFiles.length === 0 && referenceImageFiles.length === 0);
+  const isImageGenerateDisabled = isLoading || (!imageGenState.prompt.trim() && baseImageFiles.length === 0 && referenceImageFiles.length === 0);
   const isVideoGenerateDisabled = isLoading || !isVeoKeyReady || (allVideoImageFiles.length === 0 && !videoPrompt.trim());
 
   const handleModeChange = (newMode: Mode) => {
@@ -426,6 +492,10 @@ const App: React.FC = () => {
         currentSettings={appSettings}
         onClearWorkspace={handleClearWorkspace}
       />
+      <Lightbox
+        creation={lightboxContent}
+        onClose={() => setLightboxContent(null)}
+      />
       <main className="container mx-auto p-4 md:p-8 flex-grow w-full flex flex-col items-center gap-8">
         <div className="w-full text-center mb-4">
              <p className="mt-3 text-lg text-gray-400">시그니처 스타일을 가진 아티스트.</p>
@@ -449,8 +519,8 @@ const App: React.FC = () => {
                 <>
                   <StyleSelector
                     styles={artStyleOptions}
-                    selectedStyle={artStyle}
-                    onSelect={setArtStyle}
+                    selectedStyle={imageGenState.artStyle}
+                    onSelect={(value) => dispatchImageGenState({ type: 'SET_FIELD', field: 'artStyle', value })}
                     disabled={isLoading}
                   />
                   
@@ -461,17 +531,26 @@ const App: React.FC = () => {
                     <div className="relative">
                       <textarea
                         id="prompt"
-                        value={prompt}
-                        onChange={(e) => setPrompt(e.target.value)}
+                        value={imageGenState.prompt}
+                        onChange={(e) => dispatchImageGenState({ type: 'SET_FIELD', field: 'prompt', value: e.target.value })}
                         placeholder={baseImageFiles.length > 0 ? "예: 캐릭터에게 왕관을 씌워주세요..." : "예: 폭풍우가 치는 바다 위의 노아의 방주..."}
                         className="w-full h-36 p-3 bg-gray-900 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition"
                         disabled={isLoading}
                       />
-                      <button onClick={handleInspireMe} disabled={isLoading} title="영감 얻기"
-                        className="absolute bottom-3 right-3 text-gray-400 hover:text-purple-400 transition-colors disabled:opacity-50"
-                      >
-                        <SparklesIcon className="w-5 h-5" />
-                      </button>
+                      <div className="absolute bottom-3 right-3 flex items-center gap-2">
+                        {imageGenState.originalPrompt && (
+                            <button onClick={() => dispatchImageGenState({ type: 'REVERT_PROMPT' })} disabled={isLoading} title="원래대로"
+                                className="text-gray-400 hover:text-purple-400 transition-colors disabled:opacity-50"
+                            >
+                                <UndoIcon className="w-5 h-5" />
+                            </button>
+                        )}
+                        <button onClick={handleInspireMe} disabled={isLoading} title="영감 얻기"
+                          className="text-gray-400 hover:text-purple-400 transition-colors disabled:opacity-50"
+                        >
+                          <SparklesIcon className="w-5 h-5" />
+                        </button>
+                      </div>
                     </div>
                   </div>
                   
@@ -482,8 +561,8 @@ const App: React.FC = () => {
                     <div className="relative">
                       <textarea
                         id="negative-prompt"
-                        value={negativePrompt}
-                        onChange={(e) => setNegativePrompt(e.target.value)}
+                        value={imageGenState.negativePrompt}
+                        onChange={(e) => dispatchImageGenState({ type: 'SET_FIELD', field: 'negativePrompt', value: e.target.value })}
                         placeholder="예: 텍스트, 흐릿함, 6개 이상의 손가락..."
                         className="w-full h-24 p-3 bg-gray-900 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition"
                         disabled={isLoading}
@@ -529,7 +608,7 @@ const App: React.FC = () => {
                                 <label className="block text-sm font-medium text-gray-300 mb-1">품질</label>
                                 <div className="flex gap-2">
                                     {qualityOptions.map(option => (
-                                        <SettingButton key={option.id} onClick={() => setQuality(option.id)} disabled={isLoading} active={quality === option.id}>
+                                        <SettingButton key={option.id} onClick={() => dispatchImageGenState({ type: 'SET_FIELD', field: 'quality', value: option.id })} disabled={isLoading} active={imageGenState.quality === option.id}>
                                             <span className="whitespace-nowrap">{option.label}</span>
                                         </SettingButton>
                                     ))}
@@ -539,7 +618,7 @@ const App: React.FC = () => {
                                 <label className="block text-sm font-medium text-gray-300 mb-1">이미지 규격</label>
                                 <div className="flex gap-2">
                                     {imageAspectRatioOptions.map(option => (
-                                        <SettingButton key={option.id} onClick={() => setImageAspectRatio(option.id)} disabled={isLoading} active={imageAspectRatio === option.id}>
+                                        <SettingButton key={option.id} onClick={() => dispatchImageGenState({ type: 'SET_FIELD', field: 'imageAspectRatio', value: option.id })} disabled={isLoading} active={imageGenState.imageAspectRatio === option.id}>
                                             <div className="flex flex-col items-center justify-center leading-tight">
                                                 <span>{option.label.split('\n')[0]}</span>
                                                 {option.label.split('\n')[1] && <span className="text-xs">{option.label.split('\n')[1]}</span>}
@@ -553,7 +632,7 @@ const App: React.FC = () => {
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-start">
                             <div>
                                 <label htmlFor="num-outputs" className="block text-sm font-medium text-gray-300 mb-1">생성 개수</label>
-                                <select id="num-outputs" value={numOutputs} onChange={(e) => setNumOutputs(Number(e.target.value))} disabled={isLoading}
+                                <select id="num-outputs" value={imageGenState.numOutputs} onChange={(e) => dispatchImageGenState({ type: 'SET_FIELD', field: 'numOutputs', value: Number(e.target.value)})} disabled={isLoading}
                                   className="bg-gray-700 border border-gray-600 rounded-md px-2 py-1 text-sm focus:ring-1 focus:ring-purple-500 disabled:opacity-50"
                                 >
                                   <option value={1}>1</option>
@@ -566,13 +645,13 @@ const App: React.FC = () => {
                                 <label className="block text-sm font-medium text-gray-300 mb-1">
                                   프롬프트 확장
                                 </label>
-                                <label className={`relative inline-flex items-center ${isLoading || !prompt.trim() ? 'cursor-not-allowed' : 'cursor-pointer'}`} title={!prompt.trim() ? "프롬프트를 입력해야 확장을 사용할 수 있습니다." : "AI가 프롬프트를 더 창의적으로 개선합니다."}>
+                                <label className={`relative inline-flex items-center ${isLoading || !imageGenState.prompt.trim() ? 'cursor-not-allowed' : 'cursor-pointer'}`} title={!imageGenState.prompt.trim() ? "프롬프트를 입력해야 확장을 사용할 수 있습니다." : "AI가 프롬프트를 더 창의적으로 개선합니다."}>
                                     <input 
                                         type="checkbox" 
-                                        checked={isPromptExpansionEnabled} 
-                                        onChange={() => setIsPromptExpansionEnabled(!isPromptExpansionEnabled)} 
+                                        checked={imageGenState.isPromptExpansionEnabled} 
+                                        onChange={() => dispatchImageGenState({ type: 'SET_FIELD', field: 'isPromptExpansionEnabled', value: !imageGenState.isPromptExpansionEnabled })} 
                                         className="sr-only peer" 
-                                        disabled={isLoading || !prompt.trim()}
+                                        disabled={isLoading || !imageGenState.prompt.trim()}
                                     />
                                     <div className="w-11 h-6 bg-gray-600 rounded-full peer peer-focus:ring-2 peer-focus:ring-purple-500 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-teal-500 peer-disabled:opacity-50"></div>
                                 </label>
@@ -584,12 +663,29 @@ const App: React.FC = () => {
                     </div>
                   </div>
                   
-                  <button onClick={handleImageGenerate} disabled={isImageGenerateDisabled}
-                    className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-purple-600 to-teal-500 text-white font-bold py-4 px-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed hover:from-purple-700 hover:to-teal-600"
-                  >
-                    <SparklesIcon className="w-6 h-6" />
-                    <span>{isImageGenerateDisabled && (baseImageFiles.length > 0 || referenceImageFiles.length > 0) ? "비전을 입력하세요" : "아트 생성"}</span>
-                  </button>
+                  {imageGenState.isPromptExpansionEnabled ? (
+                    <button onClick={handlePromptExpansion} disabled={isLoading || !imageGenState.prompt.trim()}
+                      className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-green-600 to-emerald-500 text-white font-bold py-4 px-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed hover:from-green-700 hover:to-emerald-600"
+                    >
+                      <SparklesIcon className="w-6 h-6" />
+                      <span>프롬프트 제안받기</span>
+                    </button>
+                  ) : (
+                    <button onClick={handleImageGenerate} disabled={isImageGenerateDisabled}
+                      className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-purple-600 to-teal-500 text-white font-bold py-4 px-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed hover:from-purple-700 hover:to-teal-600"
+                    >
+                      <SparklesIcon className="w-6 h-6" />
+                      <span>{isImageGenerateDisabled && (baseImageFiles.length > 0 || referenceImageFiles.length > 0) ? "비전을 입력하세요" : "아트 생성"}</span>
+                    </button>
+                  )}
+                  {imageGenState.originalPrompt && (
+                     <button onClick={handleImageGenerate} disabled={isLoading}
+                     className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-purple-600 to-teal-500 text-white font-bold py-4 px-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed hover:from-purple-700 hover:to-teal-600"
+                   >
+                     <SparklesIcon className="w-6 h-6" />
+                     <span>제안된 프롬프트로 아트 생성</span>
+                   </button>
+                  )}
                 </>
               )}
               {mode === 'video' && (
@@ -724,7 +820,8 @@ const App: React.FC = () => {
               isLoading={isLoading} 
               error={error} 
               loadingMessage={loadingMessage}
-              onSave={handleSaveCreation}
+              onSave={(image) => handleSaveCreation(image, 'image')}
+              onImageClick={(image) => setLightboxContent({ id: 0, base64: `data:image/png;base64,${image}`, type: 'image', createdAt: new Date() })}
             />
           ) : (
             <VideoDisplay
@@ -741,6 +838,7 @@ const App: React.FC = () => {
           creations={savedCreations}
           onSelectForEditing={handleSelectForEditing}
           onDelete={handleDeleteCreation}
+          onCreationClick={setLightboxContent}
         />
       </main>
     </div>

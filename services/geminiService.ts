@@ -70,6 +70,38 @@ const QUALITY_PROMPTS: { [key in QualityId]: string } = {
   'High': 'Create the image with intricate details, ultra-high resolution, and masterpiece quality. Pay close attention to textures, lighting, and subtle nuances to make it look stunning and professional.',
 };
 
+export const expandPrompt = async (
+    userPrompt: string,
+    onStatusUpdate: (message: string) => void
+): Promise<string> => {
+    // @ts-ignore
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    onStatusUpdate("프롬프트를 확장하는 중...");
+    try {
+        const expansionPrompt = `You are a creative assistant and an expert prompt engineer for an advanced AI image generation model. Your task is to take a user's core idea and expand it into a much more vivid, artistic, and detailed prompt.
+- **Goal:** Enhance the original concept with rich sensory details, dynamic action, emotional depth, and a compelling atmosphere.
+- **Process:** Maintain the key subject of the original prompt but build a world around it. Describe the lighting, the environment, the mood, and the specific details that will make the image come alive.
+- **Output:** The final result should be a well-written, descriptive paragraph that the image generation model can easily understand and interpret to create a beautiful piece of art. It should be written in a single block of text.
+
+# Original User Prompt:
+"${userPrompt}"`;
+        const expansionResponse = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: expansionPrompt,
+        });
+        
+        const expandedText = expansionResponse.text;
+        if (expandedText && expandedText.trim()) {
+            return expandedText.trim();
+        }
+        throw new Error("Expanded prompt was empty.");
+    } catch (expansionError) {
+        console.warn("Prompt expansion failed:", expansionError);
+        onStatusUpdate("프롬프트 확장에 실패했습니다.");
+        throw expansionError;
+    }
+};
+
 export const generateArt = async (
   userPrompt: string,
   baseImages: { mimeType: string; data: string }[],
@@ -80,7 +112,6 @@ export const generateArt = async (
   quality: QualityId,
   negativePrompt: string,
   imageAspectRatio: ImageAspectRatio,
-  isPromptExpansionEnabled: boolean
 ): Promise<string[]> => {
   // @ts-ignore
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -92,29 +123,6 @@ export const generateArt = async (
 
     if (useImagenModel) {
         // --- LOGIC FOR IMAGEN MODEL (text or reference images -> new image) ---
-        
-        let finalUserPrompt = userPrompt;
-
-        if (isPromptExpansionEnabled && userPrompt.trim()) {
-            onStatusUpdate("프롬프트를 확장하는 중...");
-            try {
-                const expansionPrompt = `당신은 AI 이미지 생성 모델을 위한 프롬프트 전문가입니다. 다음 사용자의 프롬프트를 받아서, 핵심 주제는 유지하면서도 훨씬 더 생생하고, 예술적이며, 상세한 묘사가 담긴 프롬프트로 확장해주세요. 최종 결과물은 이미지 생성 모델이 잘 이해할 수 있도록 작성되어야 합니다.\n\n# 원본 프롬프트:\n"${userPrompt}"`;
-                const expansionResponse = await ai.models.generateContent({
-                    model: 'gemini-2.5-flash',
-                    contents: expansionPrompt,
-                });
-                
-                const expandedText = expansionResponse.text;
-                if (expandedText && expandedText.trim()) {
-                    finalUserPrompt = expandedText.trim();
-                }
-            } catch (expansionError) {
-                console.warn("Prompt expansion failed:", expansionError);
-                onStatusUpdate("프롬프트 확장에 실패하여 원본으로 진행합니다.");
-            }
-        }
-
-
         let finalPromptText: string;
         const qualityInstruction = QUALITY_PROMPTS[quality] || '';
         let referenceImageDescription = '';
@@ -142,11 +150,11 @@ export const generateArt = async (
                 throw new Error("참고 이미지를 분석하지 못했습니다.");
             }
             onStatusUpdate("분석을 기반으로 그림을 그리는 중...");
-            finalPromptText = `${ARTIST_STYLE_PROMPT}\n${STYLE_PROMPTS[artStyle] || ''}\n\n**Based on the following analysis of a reference image, create a new illustration in your signature style:**\n"${referenceImageDescription}"\n\n**Incorporate the user's specific instructions:** "${finalUserPrompt || 'Create an image based on the analysis.'}"\n\n**Quality Instructions:** ${qualityInstruction}`;
+            finalPromptText = `${ARTIST_STYLE_PROMPT}\n${STYLE_PROMPTS[artStyle] || ''}\n\n**Based on the following analysis of a reference image, create a new illustration in your signature style:**\n"${referenceImageDescription}"\n\n**Incorporate the user's specific instructions:** "${userPrompt || 'Create an image based on the analysis.'}"\n\n**Quality Instructions:** ${qualityInstruction}`;
         } else {
             // Text prompt only
             onStatusUpdate("프롬프트를 기반으로 그림을 그리는 중...");
-            finalPromptText = `${ARTIST_STYLE_PROMPT}\n${STYLE_PROMPTS[artStyle] || ''}\n\n**User's Request:** "${finalUserPrompt}"\n\n**Quality Instructions:** ${qualityInstruction}`;
+            finalPromptText = `${ARTIST_STYLE_PROMPT}\n${STYLE_PROMPTS[artStyle] || ''}\n\n**User's Request:** "${userPrompt}"\n\n**Quality Instructions:** ${qualityInstruction}`;
         }
         
         if (negativePrompt && negativePrompt.trim()) {
@@ -286,59 +294,58 @@ export const generateVideo = async (
   aspectRatio: AspectRatio,
   resolution: Resolution,
   onStatusUpdate: (message: string) => void
-): Promise<string> => {
+): Promise<Blob> => {
   try {
     // @ts-ignore
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     onStatusUpdate('비디오 생성을 시작합니다...');
     
-    if (referenceImages.length === 0) {
-      throw new Error("비디오를 생성하려면 참고 이미지가 최소 1개 이상 필요합니다.");
+    if (referenceImages.length === 0 && !prompt.trim()) {
+      throw new Error("비디오를 생성하려면 참고 이미지가 최소 1개 이상 필요하거나 프롬프트가 있어야 합니다.");
     }
     
     const isMultiImageMode = referenceImages.length > 1;
 
-    const model = isMultiImageMode ? 'veo-3.1-generate-preview' : 'veo-3.1-fast-generate-preview';
-    const finalResolution = isMultiImageMode ? '720p' : resolution;
-    const finalAspectRatio = isMultiImageMode ? '16:9' : aspectRatio;
-    
-    let operation;
+    let model: string;
+    let finalResolution: Resolution;
+    let finalAspectRatio: AspectRatio;
 
     if (isMultiImageMode) {
-      const referenceImagesPayload = referenceImages.map(img => ({
-        image: {
-          imageBytes: img.data,
-          mimeType: img.mimeType,
-        },
-        referenceType: 'ASSET',
-      }));
-
-      operation = await ai.models.generateVideos({
-        model: model,
-        prompt: prompt,
-        config: {
-          numberOfVideos: 1,
-          referenceImages: referenceImagesPayload,
-          resolution: finalResolution,
-          aspectRatio: finalAspectRatio,
-        }
-      });
-    } else { // Single image mode
-      const singleImage = referenceImages[0];
-      operation = await ai.models.generateVideos({
-        model: model,
-        prompt: prompt,
-        image: {
-          imageBytes: singleImage.data,
-          mimeType: singleImage.mimeType,
-        },
-        config: {
-          numberOfVideos: 1,
-          resolution: finalResolution,
-          aspectRatio: finalAspectRatio,
-        }
-      });
+        model = 'veo-3.1-generate-preview';
+        finalResolution = '720p'; // VEO multi-image requires 720p
+        finalAspectRatio = '16:9'; // VEO multi-image requires 16:9
+    } else {
+        model = 'veo-3.1-fast-generate-preview';
+        finalResolution = resolution;
+        finalAspectRatio = aspectRatio;
     }
+    
+    let operation;
+    let requestPayload: any = {
+        model: model,
+        prompt: prompt,
+        config: {
+            numberOfVideos: 1,
+            resolution: finalResolution,
+            aspectRatio: finalAspectRatio,
+        }
+    };
+
+    if (referenceImages.length > 0) {
+        if (isMultiImageMode) {
+            requestPayload.config.referenceImages = referenceImages.map(img => ({
+                image: { imageBytes: img.data, mimeType: img.mimeType },
+                referenceType: 'ASSET',
+            }));
+        } else { // Single image mode
+            requestPayload.image = {
+                imageBytes: referenceImages[0].data,
+                mimeType: referenceImages[0].mimeType,
+            };
+        }
+    }
+
+    operation = await ai.models.generateVideos(requestPayload);
 
     onStatusUpdate('모델이 프롬프트를 분석 중입니다...');
     
@@ -374,8 +381,7 @@ export const generateVideo = async (
         throw new Error(`비디오 다운로드 실패: ${response.statusText}`);
     }
 
-    const blob = await response.blob();
-    return URL.createObjectURL(blob);
+    return await response.blob();
 
   } catch (error) {
     console.error("Error generating video:", error);
