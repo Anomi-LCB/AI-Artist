@@ -1,3 +1,5 @@
+
+
 import React, { useState, useCallback, useEffect } from 'react';
 import { Header } from './components/Header';
 import { ImageInput } from './components/ImageInput';
@@ -45,6 +47,7 @@ const App: React.FC = () => {
   const [prompt, setPrompt] = useState<string>('');
   const [negativePrompt, setNegativePrompt] = useState<string>('');
   const [baseImageFiles, setBaseImageFiles] = useState<File[]>([]);
+  const [isBaseImageHighlighted, setIsBaseImageHighlighted] = useState<boolean>(false);
   const [referenceImageFiles, setReferenceImageFiles] = useState<File[]>([]);
   const [artStyle, setArtStyle] = useState<ArtStyleId>(DEFAULT_SETTINGS.defaultArtStyle);
   const [quality, setQuality] = useState<QualityId>(DEFAULT_SETTINGS.defaultQuality);
@@ -102,6 +105,22 @@ const App: React.FC = () => {
     };
     checkVeoKey();
   }, [mode, isAuthenticated]);
+  
+  // Warn user before leaving page if generation is in progress
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+        if (isLoading) {
+            e.preventDefault();
+            e.returnValue = '생성 작업이 진행 중입니다. 페이지를 나가시면 결과가 사라질 수 있습니다. 정말로 나가시겠습니까?';
+        }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+        window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [isLoading]);
 
 
   // Load from storage on initial mount
@@ -199,6 +218,7 @@ const App: React.FC = () => {
     setError(null);
     setGeneratedImages([]);
     setIsLoading(true);
+    setIsBaseImageHighlighted(false);
     setLoadingMessage('생성을 시작합니다...');
 
     try {
@@ -252,17 +272,19 @@ const App: React.FC = () => {
         
         let finalPrompt: string;
         if (isMultiImageMode) {
-          const promptParts = [];
-          if (characterImageFile.length > 0) promptParts.push('제공된 캐릭터 이미지를 주인공으로');
-          if (backgroundImageFile.length > 0) promptParts.push('제공된 배경 이미지 안에서');
-          if (otherImageFile.length > 0) {
-              const comment = otherImageComment.trim() ? `(${otherImageComment.trim()})` : '';
-              promptParts.push(`제공된 기타 이미지${comment}의 요소를 활용하여`);
-          }
-          const descriptivePrefix = promptParts.length > 0 ? `${promptParts.join(', ')}, ` : '';
-          finalPrompt = `${descriptivePrefix}다음 시나리오의 비디오를 만들어주세요: "${videoPrompt || '이미지들을 창의적으로 조합하여 애니메이션으로 만들어주세요.'}"`;
+            let promptSegments = [];
+            if (characterImageFile.length > 0) promptSegments.push("featuring the provided character image(s) as the main character");
+            if (backgroundImageFile.length > 0) promptSegments.push("set within the provided background image(s)");
+            if (otherImageFile.length > 0) {
+                const comment = otherImageComment.trim() ? ` (noted as: '${otherImageComment.trim()}')` : '';
+                promptSegments.push(`utilizing elements from the other provided image(s)${comment}`);
+            }
+
+            const prefix = promptSegments.length > 0 ? `Using the provided images, create a video ${promptSegments.join(', ')}. ` : '';
+            const userScenario = videoPrompt || 'Animate these images together creatively.';
+            finalPrompt = `${prefix}The video should follow this scenario: "${userScenario}"`;
         } else {
-          finalPrompt = videoPrompt || '이 이미지를 생동감 있게 만들어주세요.';
+            finalPrompt = videoPrompt || 'Bring this image to life.';
         }
 
         const resultUrl = await generateVideo(finalPrompt, imageUploads, videoAspectRatio, videoResolution, setLoadingMessage);
@@ -307,6 +329,7 @@ const App: React.FC = () => {
         setMode('image');
         const file = await base64ToFile(base64, `editing-${Date.now()}.png`, 'image/png');
         setBaseImageFiles([file]);
+        setIsBaseImageHighlighted(true);
         setReferenceImageFiles([]);
         setPrompt(''); // Clear prompt for new editing instructions
         setGeneratedImages([]); // Clear previous generation
@@ -336,6 +359,7 @@ const App: React.FC = () => {
   const handleModeChange = (newMode: Mode) => {
     setMode(newMode);
     setError(null);
+    setIsBaseImageHighlighted(false);
   };
   
   const ModeButton: React.FC<{ active: boolean, onClick: () => void, children: React.ReactNode}> = ({ active, onClick, children }) => (
@@ -474,9 +498,13 @@ const App: React.FC = () => {
                     <p className="text-sm text-gray-400 mb-2 -mt-1">여기에 업로드된 이미지를 직접 수정, 변형, 또는 리메이크합니다.</p>
                     <ImageInput 
                       files={baseImageFiles} 
-                      onFilesChange={setBaseImageFiles} 
+                      onFilesChange={(files) => {
+                        setBaseImageFiles(files);
+                        setIsBaseImageHighlighted(false);
+                      }} 
                       isLoading={isLoading} 
                       maxFiles={5}
+                      highlight={isBaseImageHighlighted}
                     />
                   </div>
 

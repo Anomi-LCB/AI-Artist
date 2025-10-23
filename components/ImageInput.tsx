@@ -1,13 +1,16 @@
-import React, { useCallback, useEffect, useState, useId } from 'react';
+
+
+import React, { useCallback, useEffect, useState, useId, useRef } from 'react';
 
 interface ImageInputProps {
   files: File[];
   onFilesChange: (files: File[]) => void;
   isLoading: boolean;
   maxFiles?: number;
+  highlight?: boolean;
 }
 
-const FilePreview: React.FC<{ file: File; onRemove: () => void; }> = ({ file, onRemove }) => {
+const FilePreview: React.FC<{ file: File; onRemove: () => void; highlight: boolean; }> = ({ file, onRemove, highlight }) => {
   const [preview, setPreview] = useState<string | null>(null);
 
   useEffect(() => {
@@ -27,8 +30,12 @@ const FilePreview: React.FC<{ file: File; onRemove: () => void; }> = ({ file, on
 
   if (!preview) return null;
 
+  const containerClasses = `relative group w-24 h-24 flex-shrink-0 rounded-lg transition-all duration-300 ${
+    highlight ? 'ring-4 ring-purple-500 shadow-lg shadow-purple-500/50' : ''
+  }`;
+
   return (
-    <div className="relative group w-24 h-24 flex-shrink-0">
+    <div className={containerClasses}>
       <img src={preview} alt={file.name} className="w-full h-full object-cover rounded-md border border-gray-700" />
       <button
         onClick={onRemove}
@@ -44,10 +51,30 @@ const FilePreview: React.FC<{ file: File; onRemove: () => void; }> = ({ file, on
 };
 
 
-export const ImageInput: React.FC<ImageInputProps> = ({ files, onFilesChange, isLoading, maxFiles }) => {
+export const ImageInput: React.FC<ImageInputProps> = ({ files, onFilesChange, isLoading, maxFiles, highlight }) => {
   const [error, setError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const inputId = useId();
+  const errorTimeoutRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+        if (errorTimeoutRef.current) {
+            clearTimeout(errorTimeoutRef.current);
+        }
+    };
+  }, []);
+
+  const displayError = useCallback((message: string) => {
+    if (errorTimeoutRef.current) {
+        clearTimeout(errorTimeoutRef.current);
+    }
+    setError(message);
+    errorTimeoutRef.current = window.setTimeout(() => {
+        setError(null);
+        errorTimeoutRef.current = null;
+    }, 5000);
+  }, []);
 
   const processFiles = useCallback((incomingFiles: FileList) => {
     const newFiles = Array.from(incomingFiles);
@@ -55,13 +82,13 @@ export const ImageInput: React.FC<ImageInputProps> = ({ files, onFilesChange, is
   
     const currentFileCount = files.length;
     if (maxFiles && currentFileCount >= maxFiles) {
-      setError(`최대 ${maxFiles}개의 이미지만 업로드할 수 있습니다.`);
+      displayError(`최대 ${maxFiles}개의 이미지만 업로드할 수 있습니다.`);
       return;
     }
   
     const validNewFiles = newFiles.filter(f => {
       if (!f.type.startsWith('image/')) {
-        setError('일부 파일은 유효한 이미지가 아니므로 무시되었습니다.');
+        displayError('일부 파일은 유효한 이미지가 아니므로 무시되었습니다.');
         return false;
       }
       return true;
@@ -73,15 +100,15 @@ export const ImageInput: React.FC<ImageInputProps> = ({ files, onFilesChange, is
     if (maxFiles && (currentFileCount + validNewFiles.length) > maxFiles) {
       const slotsAvailable = maxFiles - currentFileCount;
       filesToAdd = validNewFiles.slice(0, slotsAvailable);
-      setError(`최대 ${maxFiles}개의 이미지만 업로드할 수 있습니다. ${filesToAdd.length}개의 이미지가 추가되었습니다.`);
+      displayError(`최대 ${maxFiles}개의 이미지만 업로드할 수 있습니다. ${filesToAdd.length}개의 이미지가 추가되었습니다.`);
     } else {
-      setError(null);
+      setError(null); // Clear previous errors if successful
     }
   
     if (filesToAdd.length > 0) {
       onFilesChange([...files, ...filesToAdd]);
     }
-  }, [files, onFilesChange, maxFiles]);
+  }, [files, onFilesChange, maxFiles, displayError]);
 
   const handleFileChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     if (event.target.files) {
@@ -137,7 +164,12 @@ export const ImageInput: React.FC<ImageInputProps> = ({ files, onFilesChange, is
        {files.length > 0 && (
         <div className="flex flex-wrap gap-3 mb-3 p-2 bg-gray-900/50 rounded-lg">
             {files.map((file, index) => (
-                <FilePreview key={`${file.name}-${index}`} file={file} onRemove={() => handleRemoveFile(index)} />
+                <FilePreview 
+                  key={`${file.name}-${index}`} 
+                  file={file} 
+                  onRemove={() => handleRemoveFile(index)} 
+                  highlight={!!highlight && files.length === 1 && index === 0}
+                />
             ))}
         </div>
       )}
@@ -166,7 +198,7 @@ export const ImageInput: React.FC<ImageInputProps> = ({ files, onFilesChange, is
           multiple
         />
       </label>
-      {error && <p className="mt-2 text-sm text-red-500">{error}</p>}
+      {error && <p className="mt-2 text-sm text-red-500 animate-fade-in">{error}</p>}
     </div>
   );
 };

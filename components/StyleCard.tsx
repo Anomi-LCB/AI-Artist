@@ -24,6 +24,8 @@ export const StyleCard: React.FC<StyleCardProps> = ({ id, label, isSelected, onC
 
   const ringClass = isSelected ? 'ring-4 ring-purple-500' : 'ring-2 ring-transparent group-hover:ring-purple-400';
   const textClass = isSelected ? 'text-white' : 'text-gray-200';
+  const shadowClass = isSelected ? 'shadow-lg shadow-purple-500/50' : '';
+  const gradientOpacityClass = isSelected ? 'opacity-100' : 'opacity-80 group-hover:opacity-100';
 
   return (
     <button
@@ -36,10 +38,11 @@ export const StyleCard: React.FC<StyleCardProps> = ({ id, label, isSelected, onC
         transition-all duration-300 ease-in-out
         disabled:opacity-50 disabled:cursor-not-allowed transform 
         ${ringClass} 
+        ${shadowClass}
         ${isSelected ? 'scale-105' : 'group-hover:scale-105'}
       `}
     >
-      <div className={`absolute inset-0 bg-gradient-to-br ${visualClass} rounded-lg opacity-80 group-hover:opacity-100 transition-opacity duration-300`}></div>
+      <div className={`absolute inset-0 bg-gradient-to-br ${visualClass} rounded-lg ${gradientOpacityClass} transition-opacity duration-300`}></div>
       <div className="relative w-full h-full flex items-center justify-center p-1 text-center">
         <span className={`text-xs font-bold leading-tight drop-shadow-md whitespace-pre-line ${textClass}`}>{label}</span>
       </div>

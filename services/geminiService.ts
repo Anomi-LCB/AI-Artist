@@ -44,25 +44,25 @@ You are to generate images that are instantly recognizable as your work. Adhere 
 const STYLE_PROMPTS: { [key in ArtStyleId]: string } = {
   '클래식': '', // Base style is already defined in ARTIST_STYLE_PROMPT
   '모노크롬 잉크': `
-**스타일 변형: 모노크롬 잉크**
-- **색상 팔레트:** 엄격한 흑백. 어두운 세피아, 따뜻한 회색, 크림색 음영을 배경에 사용하세요. 다른 색상은 허용되지 않습니다.
-- **기법:** 라인 아트를 강조하세요. 복잡한 잉크 드로잉이나 목판화처럼 느껴지게 만드세요. 부드러운 그라데이션 대신 크로스 해칭과 점묘법을 사용하여 음영을 표현하세요. 전반적인 분위기는 더 극적이고 강렬해야 합니다.`,
+**Style Variant: Monochrome Ink**
+- **Color Palette:** Strictly black and white. Use shades of dark sepia, warm grays, and cream for backgrounds. No other colors are allowed.
+- **Technique:** Emphasize line art. Make it feel like an intricate ink drawing or a woodblock print. Use cross-hatching and stippling for shading instead of soft gradients. The overall mood should be more dramatic and intense.`,
   '파스텔 수채화': `
-**스타일 변형: 파스텔 수채화**
-- **색상 팔레트:** 밝은 파스텔 색상 팔레트로 전환하세요. 부드러운 분홍색, 베이비 블루, 민트 그린, 라벤더를 사용하세요. 색상은 밝고, 가볍고, 반투명해야 합니다.
-- **기법:** 채색은 옅은 수채화 물감처럼 보여야 합니다. 가장자리는 부드러워야 하며 색상이 서로 약간 번질 수 있습니다. 라인 아트는 더 얇고 부드러운 색상을 보완하기 위해 더 밝은 갈색 음영일 수 있습니다. 분위기는 꿈꾸는 듯하고, 부드럽고, 기발해야 합니다.`,
+**Style Variant: Pastel Watercolor**
+- **Color Palette:** Shift to a light, pastel color palette. Use soft pinks, baby blues, mint greens, and lavender. Colors should be bright, airy, and translucent.
+- **Technique:** The coloring should look like a light watercolor wash. Edges should be soft, and colors might bleed into each other slightly. The line art can be a lighter shade of brown to complement the softer colors. The mood should be dreamy, gentle, and whimsical.`,
   '우키요에': `
-**스타일 변형: 우키요에**
-- **미학:** 일본 우키요에 목판화 스타일을 모방하세요. 강렬하고 검은 윤곽선, 평면적인 색상 영역, 제한된 전통적인 색상 팔레트를 사용하세요.
-- **기법:** 구성은 비대칭적이고 역동적이어야 하며, 종종 자연, 역사 또는 일상 생활의 모티프를 특징으로 합니다. 질감은 수제 종이와 비슷해야 합니다. 분위기는 양식화되고 극적이어야 합니다.`,
+**Style Variant: Ukiyo-e**
+- **Aesthetic:** Emulate the style of Japanese Ukiyo-e woodblock prints. Use strong, defined black outlines, flat areas of color, and a limited, traditional color palette.
+- **Technique:** Compositions should be asymmetrical and dynamic, often featuring motifs from nature, history, or daily life. Texture should resemble handmade paper. The mood should be stylized and dramatic.`,
   '아르누보': `
-**스타일 변형: 아르누보**
-- **미학:** 아르누보 미학을 채택하세요. 길고 구불구불한 유기적인 선과 곡선이 특징입니다. 구성은 매우 장식적이고 화려해야 하며, 종종 꽃이나 식물과 같은 모티프가 디자인에 통합됩니다.
-- **기법:** 색상 팔레트는 조화로워야 하며 종종 금색 또는 은색 악센트가 있는 차분한 톤을 포함합니다. 전반적인 느낌은 우아하고 흐르는 듯해야 합니다.`,
+**Style Variant: Art Nouveau**
+- **Aesthetic:** Adopt an Art Nouveau aesthetic, characterized by long, sinuous, organic lines and curves. Compositions should be highly decorative and ornate, often incorporating floral or plant-like motifs into the design.
+- **Technique:** The color palette should be harmonious, often including muted tones with gold or silver accents. The overall feel should be elegant and flowing.`,
   '사이버펑크 글리치': `
-**스타일 변형: 사이버펑크 글리치**
-- **미학:** 사이버펑크 글리치 스타일로 이미지를 만드세요. 생생한 네온 조명(특히 분홍색, 파란색, 보라색)이 있는 어둡고 미래적인 배경을 사용하세요.
-- **기법:** 픽셀화, 스캔 라인, 색수차, 글리치 효과와 같은 디지털 아티팩트를 통합하세요. 캐릭터는 사이버네틱 강화 기능을 가질 수 있습니다. 분위기는 거칠고, 첨단 기술이며, 디스토피아적이어야 합니다.`
+**Style Variant: Cyberpunk Glitch**
+- **Aesthetic:** Create the image in a cyberpunk glitch style. Use dark, futuristic backgrounds with vibrant neon lighting (especially pinks, blues, and purples).
+- **Technique:** Incorporate digital artifacts like pixelation, scan lines, chromatic aberration, and glitch effects. Characters might have cybernetic enhancements. The mood should be gritty, high-tech, and dystopian.`
 };
 
 const QUALITY_PROMPTS: { [key in QualityId]: string } = {
@@ -121,12 +121,12 @@ export const generateArt = async (
 
         if (referenceImages.length > 0) {
             onStatusUpdate("참고 이미지를 분석하는 중...");
-            const analysisPromptText = `당신은 미술 분석 전문가입니다. 제공된 이미지를 깊이 있고 다층적으로 분석하세요. 이미지의 핵심 본질을 파악하기 위해 재귀적으로 해체해야 합니다.
-1. **감정의 핵과 서사:** 이미지가 전달하려는 핵심적인 감정이나 이야기는 무엇입니까? 인물의 표정, 몸짓, 그리고 주변 환경과의 상호작용을 분석하여 서사를 파악하세요. 중심 주제는 무엇인가요?
-2. **분위기와 무드:** 전체적인 분위기(예: 우울함, 기쁨, 긴장감, 평온함)를 묘사하세요. 이러한 무드는 어떻게 만들어지고 있나요?
-3. **색채와 빛 분석:** 사용된 색상 팔레트를 분석하세요. 주조색은 무엇이며, 이 색들이 주는 심리적 효과는 무엇입니까? 빛의 사용(예: 부드러운, 거친, 극적인 조명)이 분위기와 초점을 만드는 데 어떻게 기여하고 있나요?
-4. **구도와 역동성:** 구성을 세밀하게 분석하세요. 초점은 어디에 있습니까? 선, 형태, 균형이 감상자의 시선을 어떻게 유도하며 이미지의 에너지에 기여하나요?
-5. **종합:** 위의 모든 분석을 종합하여, 이미지를 완벽하게 설명하는 글을 작성하세요. 이 설명은 단순히 이미지에 '무엇이 있는지'를 넘어, 감정적이고 주제적인 차원에서 '무엇을 표현하려 하는지'를 포착해야 합니다. 이 분석은 다른 아티스트가 이미지의 형태뿐만 아니라 그 영혼까지 재창조하는 데 사용될 것입니다.`;
+            const analysisPromptText = `You are an expert art analyst. Analyze the provided image(s) with depth and nuance. Deconstruct them recursively to capture their core essence.
+1. **Emotional Core & Narrative:** What is the central emotion or story being conveyed? Analyze character expressions, body language, and their interaction with the environment to understand the narrative. What is the main theme?
+2. **Atmosphere & Mood:** Describe the overall atmosphere (e.g., melancholic, joyful, tense, serene). How is this mood created?
+3. **Color & Light Analysis:** Analyze the color palette. What are the dominant colors, and what psychological effects do they have? How does the use of light (e.g., soft, harsh, dramatic lighting) contribute to the mood and focus?
+4. **Composition & Dynamics:** Analyze the composition in detail. Where is the focal point? How do lines, shapes, and balance guide the viewer's eye and contribute to the image's energy?
+5. **Synthesis:** Combine all the above analyses into a comprehensive description of the image. This description should go beyond just 'what is in the image' to capture 'what it is about' on an emotional and thematic level. This analysis will be used by another artist to recreate not just the form, but the soul of the image.`;
 
             const analysisResponse = await ai.models.generateContent({
                 model: 'gemini-2.5-flash',
