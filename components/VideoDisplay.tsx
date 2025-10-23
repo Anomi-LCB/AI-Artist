@@ -8,30 +8,29 @@ interface VideoDisplayProps {
   loadingMessage: string;
 }
 
-const loadingMessages = [
-  '비디오 생성을 시작합니다...',
-  '모델이 프롬프트를 분석 중입니다...',
-  '장면을 구성하고 있습니다... 이 과정은 몇 분 정도 소요될 수 있습니다.',
-  '거의 다 됐습니다... 최종 렌더링 중입니다.',
-  '생성이 예상보다 오래 걸리고 있습니다...',
-];
-
-const LoadingSpinner: React.FC<{ message: string }> = ({ message }) => {
-    const [displayedMessage, setDisplayedMessage] = useState(message || loadingMessages[0]);
-  
-    useEffect(() => {
-      if (message && message !== displayedMessage) {
-        setDisplayedMessage(message);
+const LoadingIndicator: React.FC<{ message: string }> = ({ message }) => (
+  <div className="flex flex-col items-center justify-center gap-6 text-center">
+    <div className="flex items-center justify-center space-x-2">
+      <div className="w-4 h-4 rounded-full bg-teal-400 animate-[pulse_1.4s_ease-in-out_infinite]"></div>
+      <div className="w-4 h-4 rounded-full bg-teal-400 animate-[pulse_1.4s_ease-in-out_0.2s_infinite]"></div>
+      <div className="w-4 h-4 rounded-full bg-teal-400 animate-[pulse_1.4s_ease-in-out_0.4s_infinite]"></div>
+    </div>
+    <p className="text-gray-400 font-semibold text-lg px-4">{message || '비디오를 생성하고 있습니다...'}</p>
+    <style>{`
+      @keyframes pulse {
+        0%, 80%, 100% {
+          transform: scale(1);
+          opacity: 1;
+        }
+        40% {
+          transform: scale(0.5);
+          opacity: 0.5;
+        }
       }
-    }, [message, displayedMessage]);
+    `}</style>
+  </div>
+);
 
-    return (
-        <div className="flex flex-col items-center justify-center gap-4 text-center">
-            <div className="w-16 h-16 border-4 border-dashed rounded-full animate-spin border-teal-400"></div>
-            <p className="text-gray-400 font-semibold text-lg px-4">{displayedMessage}</p>
-        </div>
-    );
-};
 
 export const VideoDisplay: React.FC<VideoDisplayProps> = ({ videoUrl, isLoading, error, loadingMessage }) => {
   const handleDownload = () => {
@@ -50,7 +49,7 @@ export const VideoDisplay: React.FC<VideoDisplayProps> = ({ videoUrl, isLoading,
     <div className="w-full lg:w-1/2 flex flex-col gap-4">
       <div className="relative w-full aspect-square bg-gray-900/50 rounded-2xl flex items-center justify-center p-4 border border-gray-700 shadow-2xl shadow-teal-900/20">
         {isLoading ? (
-          <LoadingSpinner message={loadingMessage} />
+          <LoadingIndicator message={loadingMessage} />
         ) : error ? (
           <div className="text-center text-red-400">
             <h3 className="text-xl font-bold">오류가 발생했습니다</h3>

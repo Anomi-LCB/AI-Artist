@@ -70,12 +70,22 @@ const QUALITY_PROMPTS: { [key in QualityId]: string } = {
   'High': 'Create the image with intricate details, ultra-high resolution, and masterpiece quality. Pay close attention to textures, lighting, and subtle nuances to make it look stunning and professional.',
 };
 
+const getFriendlyBlockReason = (reason: string | undefined): string => {
+    switch (reason) {
+        case 'SAFETY':
+            return '안전 설정에 의해 생성이 차단되었습니다. 더 안전한 프롬프트를 사용해 보세요.';
+        case 'OTHER':
+            return '알 수 없는 이유로 생성이 차단되었습니다. 프롬프트를 약간 수정하여 다시 시도해 보세요.';
+        default:
+            return `생성이 차단되었습니다 (이유: ${reason}).`;
+    }
+};
+
 export const expandPrompt = async (
     userPrompt: string,
     onStatusUpdate: (message: string) => void
 ): Promise<string> => {
-    // @ts-ignore
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
     onStatusUpdate("프롬프트를 확장하는 중...");
     try {
         const expansionPrompt = `You are a creative assistant and an expert prompt engineer for an advanced AI image generation model. Your task is to take a user's core idea and expand it into a much more vivid, artistic, and detailed prompt.
@@ -113,8 +123,7 @@ export const generateArt = async (
   negativePrompt: string,
   imageAspectRatio: ImageAspectRatio,
 ): Promise<string[]> => {
-  // @ts-ignore
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
   
   try {
     const useImagenModel = baseImages.length === 0;
@@ -243,15 +252,16 @@ export const generateArt = async (
 
         const responses = await Promise.all(generationPromises);
         const allResults: string[] = [];
+        let firstBlockReason: string | undefined = undefined;
+
 
         responses.forEach(response => {
             if (!response.candidates || response.candidates.length === 0) {
                 const blockReason = response.promptFeedback?.blockReason;
-                if (blockReason) {
-                    console.warn(`하나의 이미지 생성이 차단되었습니다 (${blockReason}).`);
-                } else {
-                    console.warn("API에서 응답 후보를 받지 못했습니다. 요청이 차단되었을 수 있습니다.");
+                if (blockReason && !firstBlockReason) {
+                    firstBlockReason = blockReason;
                 }
+                console.warn(`하나의 이미지 생성이 차단되었습니다 (이유: ${blockReason}).`);
                 return;
             }
 
@@ -274,6 +284,9 @@ export const generateArt = async (
         });
 
         if (allResults.length === 0) {
+            if (firstBlockReason) {
+                throw new Error(getFriendlyBlockReason(firstBlockReason));
+            }
             throw new Error("API에서 유효한 이미지를 받지 못했습니다. 모든 생성이 실패했거나 예상치 못한 응답 형식이 반환되었습니다.");
         }
         
@@ -296,8 +309,7 @@ export const generateVideo = async (
   onStatusUpdate: (message: string) => void
 ): Promise<Blob> => {
   try {
-    // @ts-ignore
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
     onStatusUpdate('비디오 생성을 시작합니다...');
     
     if (referenceImages.length === 0 && !prompt.trim()) {
@@ -375,8 +387,7 @@ export const generateVideo = async (
     if (!downloadLink) {
       throw new Error("생성된 비디오 URI를 찾을 수 없습니다.");
     }
-    // @ts-ignore
-    const response = await fetch(`${downloadLink}&key=${process.env.API_KEY}`);
+    const response = await fetch(`${downloadLink}&key=${process.env.API_KEY!}`);
     if (!response.ok) {
         throw new Error(`비디오 다운로드 실패: ${response.statusText}`);
     }

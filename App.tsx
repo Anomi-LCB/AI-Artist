@@ -1,6 +1,6 @@
 
 
-import React, { useState, useCallback, useEffect, useReducer } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { Header } from './components/Header';
 import { ImageInput } from './components/ImageInput';
 import { ArtDisplay } from './components/ArtDisplay';
@@ -9,14 +9,16 @@ import { SparklesIcon } from './components/icons/SparklesIcon';
 import { PhotoIcon } from './components/icons/PhotoIcon';
 import { VideoCameraIcon } from './components/icons/VideoCameraIcon';
 import { UndoIcon } from './components/icons/UndoIcon';
-import { generateArt, generateVideo, expandPrompt } from './services/geminiService';
-import { fileToBase64, base64ToFile, blobToBase64 } from './utils/fileUtils';
+import { InfoIcon } from './components/icons/InfoIcon';
+import { useImageGeneration, useVideoGeneration } from './hooks/generationHooks';
+import { base64ToFile } from './utils/fileUtils';
 import { Workspace } from './components/Workspace';
 import { StyleSelector } from './components/StyleSelector';
 import { SettingsModal } from './components/SettingsModal';
 import { Lightbox } from './components/Lightbox';
-import { ArtStyleId, QualityId, WorkspaceCreation, AspectRatio, Resolution, AppSettings, ImageAspectRatio } from './types';
-import { artStyleOptions, qualityOptions, inspirationalPrompts, imageAspectRatioOptions } from './constants';
+import { WorkspaceCreation, AppSettings } from './types';
+// FIX: import inspirationalPrompts
+import { artStyleOptions, qualityOptions, imageAspectRatioOptions, inspirationalPrompts } from './constants';
 import { getAllCreations, addCreation, deleteCreation, clearAllCreations } from './lib/db';
 import { LoginPage } from './components/LoginPage';
 import { GettingStartedPage } from './components/GettingStartedPage';
@@ -32,45 +34,6 @@ const DEFAULT_SETTINGS: AppSettings = {
   defaultImageAspectRatio: '1:1',
 };
 
-// Reducer for image generation state
-interface ImageGenState {
-  prompt: string;
-  originalPrompt: string; // To store prompt before expansion
-  negativePrompt: string;
-  artStyle: ArtStyleId;
-  quality: QualityId;
-  imageAspectRatio: ImageAspectRatio;
-  numOutputs: number;
-  isPromptExpansionEnabled: boolean;
-}
-
-type ImageGenAction =
-  | { type: 'SET_FIELD'; field: keyof ImageGenState; value: any }
-  | { type: 'SET_PROMPT_EXPANSION'; prompt: string; originalPrompt: string }
-  | { type: 'REVERT_PROMPT' }
-  | { type: 'RESET_TO_DEFAULTS'; defaults: AppSettings };
-
-const imageGenerationReducer = (state: ImageGenState, action: ImageGenAction): ImageGenState => {
-  switch (action.type) {
-    case 'SET_FIELD':
-      return { ...state, [action.field]: action.value };
-    case 'SET_PROMPT_EXPANSION':
-      return { ...state, prompt: action.prompt, originalPrompt: action.originalPrompt };
-    case 'REVERT_PROMPT':
-        return { ...state, prompt: state.originalPrompt, originalPrompt: '' };
-    case 'RESET_TO_DEFAULTS':
-      return {
-        ...state,
-        artStyle: action.defaults.defaultArtStyle,
-        quality: action.defaults.defaultQuality,
-        numOutputs: action.defaults.defaultNumOutputs,
-        imageAspectRatio: action.defaults.defaultImageAspectRatio,
-      };
-    default:
-      return state;
-  }
-};
-
 const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [userName, setUserName] = useState<string>('');
@@ -84,39 +47,44 @@ const App: React.FC = () => {
   const [appSettings, setAppSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [lightboxContent, setLightboxContent] = useState<WorkspaceCreation | null>(null);
-
-  // Image Generation State (managed by reducer)
-  const initialImageGenState: ImageGenState = {
-    prompt: '',
-    originalPrompt: '',
-    negativePrompt: '',
-    artStyle: DEFAULT_SETTINGS.defaultArtStyle,
-    quality: DEFAULT_SETTINGS.defaultQuality,
-    imageAspectRatio: DEFAULT_SETTINGS.defaultImageAspectRatio,
-    numOutputs: DEFAULT_SETTINGS.defaultNumOutputs,
-    isPromptExpansionEnabled: false,
-  };
-  const [imageGenState, dispatchImageGenState] = useReducer(imageGenerationReducer, initialImageGenState);
-  
-  const [baseImageFiles, setBaseImageFiles] = useState<File[]>([]);
-  const [isBaseImageHighlighted, setIsBaseImageHighlighted] = useState<boolean>(false);
-  const [referenceImageFiles, setReferenceImageFiles] = useState<File[]>([]);
-  const [generatedImages, setGeneratedImages] = useState<string[]>([]);
   const [savedCreations, setSavedCreations] = useState<WorkspaceCreation[]>([]);
 
-  // Video Generation State
-  const [videoPrompt, setVideoPrompt] = useState<string>('');
-  const [backgroundImageFile, setBackgroundImageFile] = useState<File[]>([]);
-  const [characterImageFile, setCharacterImageFile] = useState<File[]>([]);
-  const [otherImageFile, setOtherImageFile] = useState<File[]>([]);
-  const [otherImageComment, setOtherImageComment] = useState<string>('');
-  const [generatedVideoUrl, setGeneratedVideoUrl] = useState<string | null>(null);
-  const [videoAspectRatio, setVideoAspectRatio] = useState<AspectRatio>('16:9');
-  const [videoResolution, setVideoResolution] = useState<Resolution>('1080p');
-  const [isVeoKeyReady, setIsVeoKeyReady] = useState(false);
+  // Image Generation Hook
+  const {
+    imageGenState,
+    dispatchImageGenState,
+    baseImageFiles,
+    setBaseImageFiles,
+    isBaseImageHighlighted,
+    setIsBaseImageHighlighted,
+    referenceImageFiles,
+    setReferenceImageFiles,
+    generatedImages,
+    // FIX: Destructure setGeneratedImages from the hook to manage state correctly
+    setGeneratedImages,
+    handleImageGenerate,
+    handlePromptExpansion,
+    isImageGenerateDisabled
+    // FIX: Remove the incorrect setGeneratedImages prop. The hook now manages its own state.
+  } = useImageGeneration({ appSettings, setIsLoading, setError, setLoadingMessage });
+  
+  // Video Generation Hook
+  const {
+    videoState,
+    setVideoState,
+    handleVideoGenerate,
+    isVeoKeyReady,
+    setIsVeoKeyReady,
+    isVideoGenerateDisabled
+    // FIX: Pass isLoading state to the hook for correct disabled logic
+  } = useVideoGeneration({ isLoading, setIsLoading, setError, setLoadingMessage, setGeneratedVideoUrl: (url) => {
+    if(url) {
+        // We get a blob URL which we need to save to IndexedDB
+        fetch(url).then(res => res.blob()).then(blob => handleSaveCreation(blob, 'video'));
+    }
+    setVideoState(prev => ({ ...prev, generatedVideoUrl: url }));
+  }});
 
-  const allVideoImageFiles = [...backgroundImageFile, ...characterImageFile, ...otherImageFile];
-  const isMultiImageMode = allVideoImageFiles.length > 1;
 
   // Check for session on mount
   useEffect(() => {
@@ -132,17 +100,10 @@ const App: React.FC = () => {
     }
   }, []);
 
-  useEffect(() => {
-    if (isMultiImageMode) {
-      setVideoAspectRatio('16:9');
-      setVideoResolution('720p');
-    }
-  }, [isMultiImageMode]);
-  
+  // Check for VEO key when mode changes
   useEffect(() => {
     const checkVeoKey = async () => {
       if (mode === 'video' && isAuthenticated) {
-        // @ts-ignore - aistudio is available in the execution environment
         if (window.aistudio && await window.aistudio.hasSelectedApiKey()) {
           setIsVeoKeyReady(true);
         } else {
@@ -151,7 +112,7 @@ const App: React.FC = () => {
       }
     };
     checkVeoKey();
-  }, [mode, isAuthenticated]);
+  }, [mode, isAuthenticated, setIsVeoKeyReady]);
   
   // Warn user before leaving page if generation is in progress
   useEffect(() => {
@@ -161,46 +122,34 @@ const App: React.FC = () => {
             e.returnValue = '생성 작업이 진행 중입니다. 페이지를 나가시면 결과가 사라질 수 있습니다. 정말로 나가시겠습니까?';
         }
     };
-
     window.addEventListener('beforeunload', handleBeforeUnload);
-
-    return () => {
-        window.removeEventListener('beforeunload', handleBeforeUnload);
-    };
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [isLoading]);
 
 
-  // Load from storage on initial mount
+  // Load settings and creations on auth
   useEffect(() => {
     if (!isAuthenticated) return;
 
     const loadData = async () => {
-      // Load Settings
       try {
         const savedSettingsString = localStorage.getItem(SETTINGS_STORAGE_KEY);
-        if (savedSettingsString) {
-          const savedSettings = JSON.parse(savedSettingsString) as AppSettings;
-          setAppSettings(savedSettings);
-          // Apply loaded settings to state
-          dispatchImageGenState({ type: 'RESET_TO_DEFAULTS', defaults: savedSettings });
-        }
+        const savedSettings = savedSettingsString ? JSON.parse(savedSettingsString) as AppSettings : DEFAULT_SETTINGS;
+        setAppSettings(savedSettings);
+        dispatchImageGenState({ type: 'RESET_TO_DEFAULTS', defaults: savedSettings });
       } catch (err) {
-        console.error("Failed to load settings from LocalStorage", err);
-        // Fallback to default
-        setAppSettings(DEFAULT_SETTINGS);
+        console.error("Failed to load settings", err);
       }
-
-      // Load creations from IndexedDB
       try {
         const creations = await getAllCreations();
         setSavedCreations(creations);
       } catch (err) {
-        console.error("Failed to load creations from IndexedDB", err);
+        console.error("Failed to load creations", err);
         setError("워크스페이스를 불러오는 데 실패했습니다.");
       }
     };
     loadData();
-  }, [isAuthenticated]);
+  }, [isAuthenticated, dispatchImageGenState]);
   
   const handleSaveSettings = (newSettings: AppSettings) => {
     setAppSettings(newSettings);
@@ -212,7 +161,7 @@ const App: React.FC = () => {
     try {
         await clearAllCreations();
         setSavedCreations([]);
-        setIsSettingsOpen(false); // Close modal on success
+        setIsSettingsOpen(false);
     } catch (err) {
         console.error("Failed to clear workspace", err);
         setError("워크스페이스를 비우는 데 실패했습니다.");
@@ -245,182 +194,59 @@ const App: React.FC = () => {
     if (mode === 'image') {
       dispatchImageGenState({ type: 'SET_FIELD', field: 'prompt', value: randomPrompt });
     } else {
-      setVideoPrompt(randomPrompt)
+      setVideoState(prev => ({...prev, prompt: randomPrompt}));
     }
-  }, [mode]);
-
-  const handlePromptExpansion = useCallback(async () => {
-    if (!imageGenState.prompt.trim()) return;
-    setError(null);
-    setIsLoading(true);
-    try {
-        const expanded = await expandPrompt(imageGenState.prompt, setLoadingMessage);
-        dispatchImageGenState({ type: 'SET_PROMPT_EXPANSION', prompt: expanded, originalPrompt: imageGenState.prompt });
-    } catch(err) {
-        // Error is handled inside expandPrompt
-    } finally {
-        setIsLoading(false);
-    }
-  }, [imageGenState.prompt]);
-
-  const handleImageGenerate = useCallback(async () => {
-    if (!imageGenState.prompt.trim() && baseImageFiles.length === 0 && referenceImageFiles.length === 0) {
-      setError('프롬프트를 입력하거나 이미지를 업로드해주세요.');
-      return;
-    }
-    
-    setError(null);
-    setGeneratedImages([]);
-    setIsLoading(true);
-    setIsBaseImageHighlighted(false);
-    setLoadingMessage('생성을 시작합니다...');
-
-    try {
-      const baseImageUploads = await Promise.all(
-        baseImageFiles.map(async (file) => ({
-          mimeType: file.type,
-          data: await fileToBase64(file),
-        }))
-      );
-
-      const referenceImageUploads = await Promise.all(
-        referenceImageFiles.map(async (file) => ({
-          mimeType: file.type,
-          data: await fileToBase64(file),
-        }))
-      );
-      
-      const results = await generateArt(imageGenState.prompt, baseImageUploads, referenceImageUploads, setLoadingMessage, imageGenState.artStyle, imageGenState.numOutputs, imageGenState.quality, imageGenState.negativePrompt, imageGenState.imageAspectRatio);
-      setGeneratedImages(results);
-      
-    } catch (err: any) {
-      setError(err.message || '알 수 없는 오류가 발생했습니다.');
-    } finally {
-      setIsLoading(false);
-      setLoadingMessage('');
-    }
-  }, [imageGenState, baseImageFiles, referenceImageFiles]);
-  
-  const handleVideoGenerate = useCallback(async () => {
-    if (!isVeoKeyReady) {
-        setError('비디오 생성을 계속하려면 VEO API 키를 선택해야 합니다.');
-        return;
-    }
-    if (allVideoImageFiles.length === 0 && !videoPrompt.trim()) {
-        setError('비디오를 생성하려면 참고 이미지를 업로드하거나 시나리오를 입력해야 합니다.');
-        return;
-    }
-    
-    setError(null);
-    setGeneratedVideoUrl(null);
-    setIsLoading(true);
-    setLoadingMessage('생성을 시작합니다...');
-
-    try {
-        const imageUploads = await Promise.all(
-            allVideoImageFiles.map(async (file) => ({
-                mimeType: file.type,
-                data: await fileToBase64(file),
-            }))
-        );
-        
-        let finalPrompt: string;
-        if (isMultiImageMode) {
-          let promptSegments: string[] = [];
-          if (characterImageFile.length > 0) promptSegments.push("featuring the provided character image(s) as the main character");
-          if (backgroundImageFile.length > 0) promptSegments.push("set within the provided background image(s)");
-          if (otherImageFile.length > 0) {
-              const comment = otherImageComment.trim() ? ` (noted as: '${otherImageComment.trim()}')` : '';
-              promptSegments.push(`utilizing elements from the other provided image(s)${comment}`);
-          }
-
-          const imageDescription = promptSegments.length > 0
-            ? `Animate a video based on the provided images: a character, a background, and other elements. `
-            : '';
-          const userScenario = videoPrompt || 'Animate these images together creatively.';
-          finalPrompt = `${imageDescription}The video's narrative should follow this scenario: "${userScenario}"`;
-        } else {
-            finalPrompt = videoPrompt || 'Bring this image to life.';
-        }
-
-        const resultBlob = await generateVideo(finalPrompt, imageUploads, videoAspectRatio, videoResolution, setLoadingMessage);
-        const videoDataUrl = URL.createObjectURL(resultBlob);
-        setGeneratedVideoUrl(videoDataUrl);
-        await handleSaveCreation(resultBlob, 'video');
-
-    } catch (err: any) {
-        if (err.message.includes("다른 키를 선택해주세요")) {
-          setIsVeoKeyReady(false); // Reset key state to prompt user to select again.
-        }
-        setError(err.message || '알 수 없는 오류가 발생했습니다.');
-    } finally {
-        setIsLoading(false);
-        setLoadingMessage('');
-    }
-  }, [videoPrompt, backgroundImageFile, characterImageFile, otherImageFile, otherImageComment, videoAspectRatio, videoResolution, allVideoImageFiles, isMultiImageMode, isVeoKeyReady]);
+  }, [mode, dispatchImageGenState, setVideoState]);
 
   const handleSaveCreation = useCallback(async (data: string | Blob, type: 'image' | 'video') => {
       try {
-        let base64Data: string;
-        if (type === 'image') {
-            base64Data = data as string;
-            // Prevent duplicate image saves
-            if (savedCreations.some(c => c.type === 'image' && c.base64 === base64Data)) return;
-            base64Data = `data:image/png;base64,${base64Data}`;
-        } else {
-            base64Data = await blobToBase64(data as Blob);
-        }
-        await addCreation(base64Data, type);
-        const updatedCreations = await getAllCreations(); // Re-fetch to get the new item with its ID
+        await addCreation(data, type);
+        const updatedCreations = await getAllCreations();
         setSavedCreations(updatedCreations);
       } catch (err) {
-        console.error("Failed to save creation to IndexedDB", err);
+        console.error("Failed to save creation", err);
         setError("워크스페이스에 저장하지 못했습니다.");
       }
-  }, [savedCreations]);
+  }, []);
 
   const handleDeleteCreation = useCallback(async (idToDelete: number) => {
     try {
       await deleteCreation(idToDelete);
       setSavedCreations(prev => prev.filter(creation => creation.id !== idToDelete));
     } catch (err) {
-      console.error("Failed to delete creation from IndexedDB", err);
+      console.error("Failed to delete creation", err);
       setError("워크스페이스에서 삭제하지 못했습니다.");
     }
   }, []);
 
-  const handleSelectForEditing = useCallback(async (base64: string) => {
+  const handleSelectForEditing = useCallback(async (base64DataUrl: string) => {
     try {
         setMode('image');
-        // The base64 from workspace will be a data URL, need to convert it to a file
-        const file = await base64ToFile(base64.split(',')[1], `editing-${Date.now()}.png`, 'image/png');
+        const file = await base64ToFile(base64DataUrl.split(',')[1], `editing-${Date.now()}.png`, 'image/png');
         setBaseImageFiles([file]);
         setIsBaseImageHighlighted(true);
         setReferenceImageFiles([]);
-        dispatchImageGenState({ type: 'SET_FIELD', field: 'prompt', value: '' }); // Clear prompt for new editing instructions
-        setGeneratedImages([]); // Clear previous generation
+        dispatchImageGenState({ type: 'SET_FIELD', field: 'prompt', value: '' });
+        setGeneratedImages([]);
         setError(null);
         window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err) {
         setError('편집할 이미지를 불러오지 못했습니다.');
     }
-  }, []);
+  }, [setBaseImageFiles, setReferenceImageFiles, dispatchImageGenState, setGeneratedImages, setIsBaseImageHighlighted]);
   
   const handleSelectVeoKey = async () => {
     try {
-      // @ts-ignore
-      await window.aistudio.openSelectKey();
-      // Assume success and update state to allow generation.
-      setIsVeoKeyReady(true);
-      setError(null);
+      if (window.aistudio) {
+        await window.aistudio.openSelectKey();
+        setIsVeoKeyReady(true);
+        setError(null);
+      }
     } catch (e) {
       console.error("API key selection failed", e);
       setError("VEO API 키 선택에 실패했습니다.");
     }
   };
-
-  const isImageGenerateDisabled = isLoading || (!imageGenState.prompt.trim() && baseImageFiles.length === 0 && referenceImageFiles.length === 0);
-  const isVideoGenerateDisabled = isLoading || !isVeoKeyReady || (allVideoImageFiles.length === 0 && !videoPrompt.trim());
 
   const handleModeChange = (newMode: Mode) => {
     setMode(newMode);
@@ -429,29 +255,27 @@ const App: React.FC = () => {
   };
   
   const ModeButton: React.FC<{ active: boolean, onClick: () => void, children: React.ReactNode}> = ({ active, onClick, children }) => (
-    <button
-      onClick={onClick}
-      disabled={isLoading}
-      className={`w-full flex items-center justify-center gap-2 px-4 py-3 font-semibold transition-colors duration-300 rounded-t-lg
-        ${active 
-            ? 'bg-gray-800/50 text-white border-b-2 border-purple-500' 
-            : 'bg-gray-900/50 text-gray-400 hover:bg-gray-800/30'
-        }`}
-    >
+    <button onClick={onClick} disabled={isLoading} className={`w-full flex items-center justify-center gap-2 px-4 py-3 font-semibold transition-colors duration-300 rounded-t-lg ${active ? 'bg-gray-800/50 text-white border-b-2 border-purple-500' : 'bg-gray-900/50 text-gray-400 hover:bg-gray-800/30'}`}>
         {children}
     </button>
   );
 
   const SettingButton: React.FC<{ active: boolean, onClick: () => void, disabled?: boolean, children: React.ReactNode}> = ({ active, onClick, disabled, children }) => (
-     <button onClick={onClick} disabled={disabled}
-        className={`flex-1 text-center px-3 py-2 text-sm font-semibold rounded-lg transition-colors duration-200 border-2 ${
-            active 
-                ? 'bg-teal-500 border-teal-500 text-white' 
-                : 'bg-gray-700 border-gray-600 hover:bg-gray-600 hover:border-gray-500 text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed'
-        }`}
-      >
+     <button onClick={onClick} disabled={disabled} className={`flex-1 text-center px-3 py-2 text-sm font-semibold rounded-lg transition-colors duration-200 border-2 ${active ? 'bg-teal-500 border-teal-500 text-white' : 'bg-gray-700 border-gray-600 hover:bg-gray-600 hover:border-gray-500 text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed'}`}>
         {children}
     </button>
+  );
+
+  const LabeledSection: React.FC<{ title: string; tooltip: string; children: React.ReactNode }> = ({ title, tooltip, children }) => (
+    <div className="flex items-center gap-2 text-lg font-semibold text-teal-300">
+      <label>{title}</label>
+      <div className="relative group">
+        <InfoIcon className="w-5 h-5 text-gray-400" />
+        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-2 text-sm text-white bg-gray-900 border border-gray-600 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+          {tooltip}
+        </div>
+      </div>
+    </div>
   );
   
   const VeoApiKeyBanner = () => (
@@ -470,32 +294,15 @@ const App: React.FC = () => {
     </div>
   );
 
-  if (!isAuthenticated) {
-    return <LoginPage onLoginSuccess={handleLoginSuccess} />;
-  }
-
-  if (!hasStarted) {
-    return <GettingStartedPage onStart={handleStart} />;
-  }
+  if (!isAuthenticated) return <LoginPage onLoginSuccess={handleLoginSuccess} />;
+  if (!hasStarted) return <GettingStartedPage onStart={handleStart} />;
 
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100 flex flex-col">
-      <Header 
-        userName={userName}
-        onSettingsClick={() => setIsSettingsOpen(true)}
-        onLogout={handleLogout}
-      />
-      <SettingsModal 
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-        onSave={handleSaveSettings}
-        currentSettings={appSettings}
-        onClearWorkspace={handleClearWorkspace}
-      />
-      <Lightbox
-        creation={lightboxContent}
-        onClose={() => setLightboxContent(null)}
-      />
+      <Header userName={userName} onSettingsClick={() => setIsSettingsOpen(true)} onLogout={handleLogout} />
+      <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} onSave={handleSaveSettings} currentSettings={appSettings} onClearWorkspace={handleClearWorkspace} />
+      <Lightbox creation={lightboxContent} onClose={() => setLightboxContent(null)} />
+      
       <main className="container mx-auto p-4 md:p-8 flex-grow w-full flex flex-col items-center gap-8">
         <div className="w-full text-center mb-4">
              <p className="mt-3 text-lg text-gray-400">시그니처 스타일을 가진 아티스트.</p>
@@ -504,310 +311,81 @@ const App: React.FC = () => {
           {/* Left Panel: Controls */}
           <div className="w-full lg:w-1/2 flex flex-col">
             <div className="grid grid-cols-2">
-                <ModeButton active={mode === 'image'} onClick={() => handleModeChange('image')}>
-                    <PhotoIcon className="w-5 h-5" />
-                    <span>이미지 생성</span>
-                </ModeButton>
-                <ModeButton active={mode === 'video'} onClick={() => handleModeChange('video')}>
-                    <VideoCameraIcon className="w-5 h-5" />
-                    <span>비디오 생성</span>
-                </ModeButton>
+                <ModeButton active={mode === 'image'} onClick={() => handleModeChange('image')}><PhotoIcon className="w-5 h-5" /><span>이미지 생성</span></ModeButton>
+                <ModeButton active={mode === 'video'} onClick={() => handleModeChange('video')}><VideoCameraIcon className="w-5 h-5" /><span>비디오 생성</span></ModeButton>
             </div>
             
             <div className="flex flex-col gap-6 p-6 bg-gray-800/50 border border-t-0 border-gray-700 rounded-b-2xl shadow-lg flex-grow">
               {mode === 'image' && (
                 <>
-                  <StyleSelector
-                    styles={artStyleOptions}
-                    selectedStyle={imageGenState.artStyle}
-                    onSelect={(value) => dispatchImageGenState({ type: 'SET_FIELD', field: 'artStyle', value })}
-                    disabled={isLoading}
-                  />
+                  <StyleSelector styles={artStyleOptions} selectedStyle={imageGenState.artStyle} onSelect={(value) => dispatchImageGenState({ type: 'SET_FIELD', field: 'artStyle', value })} disabled={isLoading}/>
                   
                   <div>
-                    <label htmlFor="prompt" className="block text-lg font-semibold mb-2 text-teal-300">
-                      {baseImageFiles.length > 0 ? "이미지 수정하기" : "프롬프트"}
-                    </label>
+                    <label htmlFor="prompt" className="block text-lg font-semibold mb-2 text-teal-300">{baseImageFiles.length > 0 ? "이미지 수정하기" : "프롬프트"}</label>
                     <div className="relative">
-                      <textarea
-                        id="prompt"
-                        value={imageGenState.prompt}
-                        onChange={(e) => dispatchImageGenState({ type: 'SET_FIELD', field: 'prompt', value: e.target.value })}
-                        placeholder={baseImageFiles.length > 0 ? "예: 캐릭터에게 왕관을 씌워주세요..." : "예: 폭풍우가 치는 바다 위의 노아의 방주..."}
-                        className="w-full h-36 p-3 bg-gray-900 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition"
-                        disabled={isLoading}
-                      />
+                      <textarea id="prompt" value={imageGenState.prompt} onChange={(e) => dispatchImageGenState({ type: 'SET_FIELD', field: 'prompt', value: e.target.value })} placeholder={baseImageFiles.length > 0 ? "예: 캐릭터에게 왕관을 씌워주세요..." : "예: 폭풍우가 치는 바다 위의 노아의 방주..."} className="w-full h-36 p-3 bg-gray-900 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition" disabled={isLoading}/>
                       <div className="absolute bottom-3 right-3 flex items-center gap-2">
-                        {imageGenState.originalPrompt && (
-                            <button onClick={() => dispatchImageGenState({ type: 'REVERT_PROMPT' })} disabled={isLoading} title="원래대로"
-                                className="text-gray-400 hover:text-purple-400 transition-colors disabled:opacity-50"
-                            >
-                                <UndoIcon className="w-5 h-5" />
-                            </button>
-                        )}
-                        <button onClick={handleInspireMe} disabled={isLoading} title="영감 얻기"
-                          className="text-gray-400 hover:text-purple-400 transition-colors disabled:opacity-50"
-                        >
-                          <SparklesIcon className="w-5 h-5" />
-                        </button>
+                        {imageGenState.originalPrompt && (<button onClick={() => dispatchImageGenState({ type: 'REVERT_PROMPT' })} disabled={isLoading} title="원래대로" className="text-gray-400 hover:text-purple-400 transition-colors disabled:opacity-50"><UndoIcon className="w-5 h-5" /></button>)}
+                        <button onClick={handleInspireMe} disabled={isLoading} title="영감 얻기" className="text-gray-400 hover:text-purple-400 transition-colors disabled:opacity-50"><SparklesIcon className="w-5 h-5" /></button>
                       </div>
                     </div>
                   </div>
                   
                   <div>
-                    <label htmlFor="negative-prompt" className="block text-lg font-semibold mb-2 text-teal-300">
-                      제외할 내용 <span className="text-sm text-gray-400 font-normal">(선택 사항)</span>
-                    </label>
-                    <div className="relative">
-                      <textarea
-                        id="negative-prompt"
-                        value={imageGenState.negativePrompt}
-                        onChange={(e) => dispatchImageGenState({ type: 'SET_FIELD', field: 'negativePrompt', value: e.target.value })}
-                        placeholder="예: 텍스트, 흐릿함, 6개 이상의 손가락..."
-                        className="w-full h-24 p-3 bg-gray-900 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition"
-                        disabled={isLoading}
-                      />
+                    <label htmlFor="negative-prompt" className="block text-lg font-semibold mb-2 text-teal-300">제외할 내용 <span className="text-sm text-gray-400 font-normal">(선택 사항)</span></label>
+                    <textarea id="negative-prompt" value={imageGenState.negativePrompt} onChange={(e) => dispatchImageGenState({ type: 'SET_FIELD', field: 'negativePrompt', value: e.target.value })} placeholder="예: 텍스트, 흐릿함, 6개 이상의 손가락..." className="w-full h-24 p-3 bg-gray-900 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition" disabled={isLoading}/>
+                  </div>
+
+                  <div>
+                    <div className="mb-2">
+                      <LabeledSection title="이미지 편집 / 리메이크" tooltip="여기에 업로드된 이미지를 직접 수정, 변형, 또는 리메이크합니다." />
                     </div>
+                    <ImageInput files={baseImageFiles} onFilesChange={(files) => { setBaseImageFiles(files); setIsBaseImageHighlighted(false); }} isLoading={isLoading} maxFiles={5} highlight={isBaseImageHighlighted} />
                   </div>
 
                   <div>
-                    <label className="block text-lg font-semibold mb-2 text-teal-300">
-                      변경할 이미지 <span className="text-sm text-gray-400 font-normal">(기반)</span>
-                    </label>
-                    <p className="text-sm text-gray-400 mb-2 -mt-1">여기에 업로드된 이미지를 직접 수정, 변형, 또는 리메이크합니다.</p>
-                    <ImageInput 
-                      files={baseImageFiles} 
-                      onFilesChange={(files) => {
-                        setBaseImageFiles(files);
-                        setIsBaseImageHighlighted(false);
-                      }} 
-                      isLoading={isLoading} 
-                      maxFiles={5}
-                      highlight={isBaseImageHighlighted}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-lg font-semibold mb-2 text-teal-300">
-                      참고 이미지 <span className="text-sm text-gray-400 font-normal">(영감/스타일)</span>
-                    </label>
-                    <p className="text-sm text-gray-400 mb-2 -mt-1">영감을 주거나 스타일, 캐릭터, 요소를 추가하는 데 사용됩니다.</p>
-                    <ImageInput 
-                      files={referenceImageFiles} 
-                      onFilesChange={setReferenceImageFiles} 
-                      isLoading={isLoading}
-                      maxFiles={10}
-                    />
+                     <div className="mb-2">
+                      <LabeledSection title="참고 (스타일 / 영감)" tooltip="영감을 주거나 스타일, 캐릭터, 특정 요소를 추가하는 데 사용됩니다. 이 이미지는 직접 수정되지 않습니다." />
+                    </div>
+                    <ImageInput files={referenceImageFiles} onFilesChange={setReferenceImageFiles} isLoading={isLoading} maxFiles={10} />
                   </div>
                   
                   <div>
                     <label className="block text-lg font-semibold text-teal-300 mb-2">생성 옵션</label>
                     <div className="p-4 bg-gray-900/50 rounded-lg border border-gray-700 space-y-4">
                         <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
-                            <div className="sm:col-span-2">
-                                <label className="block text-sm font-medium text-gray-300 mb-1">품질</label>
-                                <div className="flex gap-2">
-                                    {qualityOptions.map(option => (
-                                        <SettingButton key={option.id} onClick={() => dispatchImageGenState({ type: 'SET_FIELD', field: 'quality', value: option.id })} disabled={isLoading} active={imageGenState.quality === option.id}>
-                                            <span className="whitespace-nowrap">{option.label}</span>
-                                        </SettingButton>
-                                    ))}
-                                </div>
-                            </div>
-                            <div className="sm:col-span-3">
-                                <label className="block text-sm font-medium text-gray-300 mb-1">이미지 규격</label>
-                                <div className="flex gap-2">
-                                    {imageAspectRatioOptions.map(option => (
-                                        <SettingButton key={option.id} onClick={() => dispatchImageGenState({ type: 'SET_FIELD', field: 'imageAspectRatio', value: option.id })} disabled={isLoading} active={imageGenState.imageAspectRatio === option.id}>
-                                            <div className="flex flex-col items-center justify-center leading-tight">
-                                                <span>{option.label.split('\n')[0]}</span>
-                                                {option.label.split('\n')[1] && <span className="text-xs">{option.label.split('\n')[1]}</span>}
-                                            </div>
-                                        </SettingButton>
-                                    ))}
-                                </div>
-                            </div>
+                            <div className="sm:col-span-2"><label className="block text-sm font-medium text-gray-300 mb-1">품질</label><div className="flex gap-2">{qualityOptions.map(option => (<SettingButton key={option.id} onClick={() => dispatchImageGenState({ type: 'SET_FIELD', field: 'quality', value: option.id })} disabled={isLoading} active={imageGenState.quality === option.id}><span className="whitespace-nowrap">{option.label}</span></SettingButton>))}</div></div>
+                            <div className="sm:col-span-3"><label className="block text-sm font-medium text-gray-300 mb-1">이미지 규격</label><div className="flex gap-2">{imageAspectRatioOptions.map(option => (<SettingButton key={option.id} onClick={() => dispatchImageGenState({ type: 'SET_FIELD', field: 'imageAspectRatio', value: option.id })} disabled={isLoading} active={imageGenState.imageAspectRatio === option.id}><div className="flex flex-col items-center justify-center leading-tight"><span>{option.label.split('\n')[0]}</span>{option.label.split('\n')[1] && <span className="text-xs">{option.label.split('\n')[1]}</span>}</div></SettingButton>))}</div></div>
                         </div>
-
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-start">
+                            <div><label htmlFor="num-outputs" className="block text-sm font-medium text-gray-300 mb-1">생성 개수</label><select id="num-outputs" value={imageGenState.numOutputs} onChange={(e) => dispatchImageGenState({ type: 'SET_FIELD', field: 'numOutputs', value: Number(e.target.value)})} disabled={isLoading} className="bg-gray-700 border border-gray-600 rounded-md px-2 py-1 text-sm focus:ring-1 focus:ring-purple-500 disabled:opacity-50"><option value={1}>1</option><option value={2}>2</option><option value={3}>3</option><option value={4}>4</option></select></div>
                             <div>
-                                <label htmlFor="num-outputs" className="block text-sm font-medium text-gray-300 mb-1">생성 개수</label>
-                                <select id="num-outputs" value={imageGenState.numOutputs} onChange={(e) => dispatchImageGenState({ type: 'SET_FIELD', field: 'numOutputs', value: Number(e.target.value)})} disabled={isLoading}
-                                  className="bg-gray-700 border border-gray-600 rounded-md px-2 py-1 text-sm focus:ring-1 focus:ring-purple-500 disabled:opacity-50"
-                                >
-                                  <option value={1}>1</option>
-                                  <option value={2}>2</option>
-                                  <option value={3}>3</option>
-                                  <option value={4}>4</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-300 mb-1">
-                                  프롬프트 확장
-                                </label>
-                                <label className={`relative inline-flex items-center ${isLoading || !imageGenState.prompt.trim() ? 'cursor-not-allowed' : 'cursor-pointer'}`} title={!imageGenState.prompt.trim() ? "프롬프트를 입력해야 확장을 사용할 수 있습니다." : "AI가 프롬프트를 더 창의적으로 개선합니다."}>
-                                    <input 
-                                        type="checkbox" 
-                                        checked={imageGenState.isPromptExpansionEnabled} 
-                                        onChange={() => dispatchImageGenState({ type: 'SET_FIELD', field: 'isPromptExpansionEnabled', value: !imageGenState.isPromptExpansionEnabled })} 
-                                        className="sr-only peer" 
-                                        disabled={isLoading || !imageGenState.prompt.trim()}
-                                    />
-                                    <div className="w-11 h-6 bg-gray-600 rounded-full peer peer-focus:ring-2 peer-focus:ring-purple-500 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-teal-500 peer-disabled:opacity-50"></div>
-                                </label>
-                                <p className="text-xs text-gray-500 mt-1">
-                                  AI가 프롬프트를 창의적으로 개선합니다.
-                                </p>
+                                <label className="block text-sm font-medium text-gray-300 mb-1">프롬프트 확장</label>
+                                <label className={`relative inline-flex items-center ${isLoading || !imageGenState.prompt.trim() ? 'cursor-not-allowed' : 'cursor-pointer'}`} title={!imageGenState.prompt.trim() ? "프롬프트를 입력해야 확장을 사용할 수 있습니다." : "AI가 프롬프트를 더 창의적으로 개선합니다."}><input type="checkbox" checked={imageGenState.isPromptExpansionEnabled} onChange={() => dispatchImageGenState({ type: 'SET_FIELD', field: 'isPromptExpansionEnabled', value: !imageGenState.isPromptExpansionEnabled })} className="sr-only peer" disabled={isLoading || !imageGenState.prompt.trim()}/><div className="w-11 h-6 bg-gray-600 rounded-full peer peer-focus:ring-2 peer-focus:ring-purple-500 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-teal-500 peer-disabled:opacity-50"></div></label>
+                                <p className="text-xs text-gray-500 mt-1">AI가 프롬프트를 창의적으로 개선합니다.</p>
                             </div>
                         </div>
                     </div>
                   </div>
                   
-                  {imageGenState.isPromptExpansionEnabled ? (
-                    <button onClick={handlePromptExpansion} disabled={isLoading || !imageGenState.prompt.trim()}
-                      className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-green-600 to-emerald-500 text-white font-bold py-4 px-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed hover:from-green-700 hover:to-emerald-600"
-                    >
-                      <SparklesIcon className="w-6 h-6" />
-                      <span>프롬프트 제안받기</span>
-                    </button>
-                  ) : (
-                    <button onClick={handleImageGenerate} disabled={isImageGenerateDisabled}
-                      className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-purple-600 to-teal-500 text-white font-bold py-4 px-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed hover:from-purple-700 hover:to-teal-600"
-                    >
-                      <SparklesIcon className="w-6 h-6" />
-                      <span>{isImageGenerateDisabled && (baseImageFiles.length > 0 || referenceImageFiles.length > 0) ? "비전을 입력하세요" : "아트 생성"}</span>
-                    </button>
-                  )}
-                  {imageGenState.originalPrompt && (
-                     <button onClick={handleImageGenerate} disabled={isLoading}
-                     className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-purple-600 to-teal-500 text-white font-bold py-4 px-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed hover:from-purple-700 hover:to-teal-600"
-                   >
-                     <SparklesIcon className="w-6 h-6" />
-                     <span>제안된 프롬프트로 아트 생성</span>
-                   </button>
-                  )}
+                  {imageGenState.isPromptExpansionEnabled ? (<button onClick={handlePromptExpansion} disabled={isLoading || !imageGenState.prompt.trim()} className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-green-600 to-emerald-500 text-white font-bold py-4 px-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed hover:from-green-700 hover:to-emerald-600"><SparklesIcon className="w-6 h-6" /><span>프롬프트 제안받기</span></button>) : (<button onClick={handleImageGenerate} disabled={isImageGenerateDisabled} className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-purple-600 to-teal-500 text-white font-bold py-4 px-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed hover:from-purple-700 hover:to-teal-600"><SparklesIcon className="w-6 h-6" /><span>{isImageGenerateDisabled && (baseImageFiles.length > 0 || referenceImageFiles.length > 0) ? "비전을 입력하세요" : "아트 생성"}</span></button>)}
+                  {imageGenState.originalPrompt && (<button onClick={handleImageGenerate} disabled={isLoading} className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-purple-600 to-teal-500 text-white font-bold py-4 px-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed hover:from-purple-700 hover:to-teal-600"><SparklesIcon className="w-6 h-6" /><span>제안된 프롬프트로 아트 생성</span></button>)}
                 </>
               )}
               {mode === 'video' && (
                 <>
                     {!isVeoKeyReady && <VeoApiKeyBanner />}
-                    <div>
-                    <label htmlFor="video-prompt" className="block text-lg font-semibold mb-2 text-teal-300">
-                        비디오 시나리오
-                    </label>
-                    <div className="relative">
-                        <textarea
-                        id="video-prompt"
-                        value={videoPrompt}
-                        onChange={(e) => setVideoPrompt(e.target.value)}
-                        placeholder="예: 캐릭터가 배경 숲을 탐험합니다..."
-                        className="w-full h-36 p-3 bg-gray-900 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition"
-                        disabled={isLoading}
-                        />
-                        <button onClick={handleInspireMe} disabled={isLoading} title="영감 얻기"
-                        className="absolute bottom-3 right-3 text-gray-400 hover:text-purple-400 transition-colors disabled:opacity-50"
-                        >
-                        <SparklesIcon className="w-5 h-5" />
-                        </button>
-                    </div>
-                    </div>
-                    
-                    <div>
-                    <label className="block text-lg font-semibold mb-2 text-teal-300">
-                        배경 이미지 <span className="text-sm text-gray-400 font-normal">(최대 3개)</span>
-                    </label>
-                    <ImageInput 
-                        files={backgroundImageFile} 
-                        onFilesChange={setBackgroundImageFile} 
-                        isLoading={isLoading}
-                        maxFiles={3}
-                    />
-                    </div>
-
-                    <div>
-                    <label className="block text-lg font-semibold mb-2 text-teal-300">
-                        캐릭터 이미지 <span className="text-sm text-gray-400 font-normal">(최대 10개)</span>
-                    </label>
-                    <ImageInput 
-                        files={characterImageFile} 
-                        onFilesChange={setCharacterImageFile} 
-                        isLoading={isLoading}
-                        maxFiles={10}
-                    />
-                    </div>
-
-                    <div>
-                    <label className="block text-lg font-semibold mb-2 text-teal-300">
-                        기타 이미지 <span className="text-sm text-gray-400 font-normal">(최대 5개)</span>
-                    </label>
-                    <p className="text-sm text-gray-400 mb-2 -mt-1">참고할 특정 아이템이나 컨셉을 추가하세요.</p>
-                    <ImageInput 
-                        files={otherImageFile} 
-                        onFilesChange={setOtherImageFile} 
-                        isLoading={isLoading}
-                        maxFiles={5}
-                    />
-                    <input
-                        type="text"
-                        value={otherImageComment}
-                        onChange={(e) => setOtherImageComment(e.target.value)}
-                        placeholder="이 이미지는 '마법 검'입니다 (선택 사항)"
-                        className="w-full mt-2 p-2 bg-gray-900 border border-gray-600 rounded-lg focus:ring-1 focus:ring-purple-500 transition"
-                        disabled={isLoading}
-                    />
-                    </div>
-
+                    <div><label htmlFor="video-prompt" className="block text-lg font-semibold mb-2 text-teal-300">비디오 시나리오</label><div className="relative"><textarea id="video-prompt" value={videoState.prompt} onChange={(e) => setVideoState(p=>({...p, prompt: e.target.value}))} placeholder="예: 캐릭터가 배경 숲을 탐험합니다..." className="w-full h-36 p-3 bg-gray-900 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition" disabled={isLoading}/><button onClick={handleInspireMe} disabled={isLoading} title="영감 얻기" className="absolute bottom-3 right-3 text-gray-400 hover:text-purple-400 transition-colors disabled:opacity-50"><SparklesIcon className="w-5 h-5" /></button></div></div>
+                    <div className="space-y-4 p-4 bg-gray-900/50 rounded-lg border border-gray-700"><h3 className="text-lg font-semibold text-teal-300 -mb-2">비디오 에셋</h3><p className="text-sm text-gray-400">비디오에 포함될 이미지를 업로드하세요. 모든 이미지는 선택 사항입니다.</p><div><label className="block font-medium mb-1 text-gray-300">배경 이미지 <span className="text-sm text-gray-400 font-normal">(최대 3개)</span></label><ImageInput files={videoState.backgroundImageFile} onFilesChange={files => setVideoState(p=>({...p, backgroundImageFile: files}))} isLoading={isLoading} maxFiles={3}/></div><div><label className="block font-medium mb-1 text-gray-300">캐릭터 이미지 <span className="text-sm text-gray-400 font-normal">(최대 10개)</span></label><ImageInput files={videoState.characterImageFile} onFilesChange={files => setVideoState(p=>({...p, characterImageFile: files}))} isLoading={isLoading} maxFiles={10}/></div><div><label className="block font-medium mb-1 text-gray-300">기타 이미지 <span className="text-sm text-gray-400 font-normal">(최대 5개, 예: 소품)</span></label><ImageInput files={videoState.otherImageFile} onFilesChange={files => setVideoState(p=>({...p, otherImageFile: files}))} isLoading={isLoading} maxFiles={5}/><input type="text" value={videoState.otherImageComment} onChange={(e) => setVideoState(p=>({...p, otherImageComment: e.target.value}))} placeholder="이 이미지는 '마법 검'입니다 (선택 사항)" className="w-full mt-2 p-2 bg-gray-900 border border-gray-600 rounded-lg focus:ring-1 focus:ring-purple-500 transition" disabled={isLoading}/></div></div>
                     <div className="space-y-2">
-                    <label className="block text-lg font-semibold text-teal-300">비디오 설정</label>
-                    {isMultiImageMode && (
-                        <p className="text-sm text-yellow-400 mb-2 bg-yellow-900/50 p-2 rounded-md">
-                        다중 이미지 모드에서는 16:9 비율과 720p 해상도로 고정됩니다.
-                        </p>
-                    )}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div>
-                            <span className="text-sm font-medium text-gray-300">화면 비율</span>
-                            <div className="flex gap-2 mt-1">
-                                <SettingButton onClick={() => setVideoAspectRatio('16:9')} disabled={isLoading || isMultiImageMode} active={videoAspectRatio === '16:9'}>
-                                    <div className="flex flex-col items-center justify-center leading-tight">
-                                        <span>16:9</span>
-                                        <span className="text-xs">(가로)</span>
-                                    </div>
-                                </SettingButton>
-                                <SettingButton onClick={() => setVideoAspectRatio('9:16')} disabled={isLoading || isMultiImageMode} active={videoAspectRatio === '9:16'}>
-                                    <div className="flex flex-col items-center justify-center leading-tight">
-                                        <span>9:16</span>
-                                        <span className="text-xs">(세로)</span>
-                                    </div>
-                                </SettingButton>
-                            </div>
-                        </div>
-                        <div>
-                            <span className="text-sm font-medium text-gray-300">해상도</span>
-                            <div className="flex gap-2 mt-1">
-                                <SettingButton onClick={() => setVideoResolution('1080p')} disabled={isLoading || isMultiImageMode} active={videoResolution === '1080p'}>
-                                    <div className="flex flex-col items-center justify-center leading-tight">
-                                        <span>1080p</span>
-                                        <span className="text-xs">(고화질)</span>
-                                    </div>
-                                </SettingButton>
-                                <SettingButton onClick={() => setVideoResolution('720p')} disabled={isLoading || isMultiImageMode} active={videoResolution === '720p'}>
-                                    <div className="flex flex-col items-center justify-center leading-tight">
-                                        <span>720p</span>
-                                        <span className="text-xs">(표준)</span>
-                                    </div>
-                                </SettingButton>
-                            </div>
+                        <label className="block text-lg font-semibold text-teal-300">비디오 설정</label>
+                        {videoState.isMultiImageMode && (<p className="text-sm text-yellow-400 mb-2 bg-yellow-900/50 p-3 rounded-md border border-yellow-700">다중 이미지 모드에서는 <strong>16:9 비율</strong>과 <strong>720p 해상도</strong>로 고정됩니다.</p>)}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div><span className="text-sm font-medium text-gray-300">화면 비율</span><div className="flex gap-2 mt-1"><SettingButton onClick={() => setVideoState(p=>({...p, aspectRatio: '16:9'}))} disabled={isLoading || videoState.isMultiImageMode} active={videoState.aspectRatio === '16:9'}><div className="flex flex-col items-center justify-center leading-tight"><span>16:9</span><span className="text-xs">(가로)</span></div></SettingButton><SettingButton onClick={() => setVideoState(p=>({...p, aspectRatio: '9:16'}))} disabled={isLoading || videoState.isMultiImageMode} active={videoState.aspectRatio === '9:16'}><div className="flex flex-col items-center justify-center leading-tight"><span>9:16</span><span className="text-xs">(세로)</span></div></SettingButton></div></div>
+                            <div><span className="text-sm font-medium text-gray-300">해상도</span><div className="flex gap-2 mt-1"><SettingButton onClick={() => setVideoState(p=>({...p, resolution: '1080p'}))} disabled={isLoading || videoState.isMultiImageMode} active={videoState.resolution === '1080p'}><div className="flex flex-col items-center justify-center leading-tight"><span>1080p</span><span className="text-xs">(고화질)</span></div></SettingButton><SettingButton onClick={() => setVideoState(p=>({...p, resolution: '720p'}))} disabled={isLoading || videoState.isMultiImageMode} active={videoState.resolution === '720p'}><div className="flex flex-col items-center justify-center leading-tight"><span>720p</span><span className="text-xs">(표준)</span></div></SettingButton></div></div>
                         </div>
                     </div>
-                    </div>
-                    
-                    <button onClick={handleVideoGenerate} disabled={isVideoGenerateDisabled}
-                    className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-teal-600 to-cyan-500 text-white font-bold py-4 px-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed hover:from-teal-700 hover:to-cyan-600"
-                    >
-                    <VideoCameraIcon className="w-6 h-6" />
-                    <span>비디오 생성</span>
-                    </button>
+                    <button onClick={handleVideoGenerate} disabled={isVideoGenerateDisabled} className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-teal-600 to-cyan-500 text-white font-bold py-4 px-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed hover:from-teal-700 hover:to-cyan-600"><VideoCameraIcon className="w-6 h-6" /><span>비디오 생성</span></button>
                 </>
               )}
             </div>
@@ -815,31 +393,13 @@ const App: React.FC = () => {
 
           {/* Right Panel: Display */}
           {mode === 'image' ? (
-            <ArtDisplay 
-              images={generatedImages} 
-              isLoading={isLoading} 
-              error={error} 
-              loadingMessage={loadingMessage}
-              onSave={(image) => handleSaveCreation(image, 'image')}
-              onImageClick={(image) => setLightboxContent({ id: 0, base64: `data:image/png;base64,${image}`, type: 'image', createdAt: new Date() })}
-            />
+            <ArtDisplay images={generatedImages} isLoading={isLoading} error={error} loadingMessage={loadingMessage} onSave={(image) => handleSaveCreation(image, 'image')} onImageClick={(image) => setLightboxContent({ id: 0, base64: `data:image/png;base64,${image}`, type: 'image', createdAt: new Date() })}/>
           ) : (
-            <VideoDisplay
-                videoUrl={generatedVideoUrl}
-                isLoading={isLoading}
-                error={error}
-                loadingMessage={loadingMessage}
-            />
+            <VideoDisplay videoUrl={videoState.generatedVideoUrl} isLoading={isLoading} error={error} loadingMessage={loadingMessage}/>
           )}
         </div>
 
-        <Workspace 
-          userName={userName}
-          creations={savedCreations}
-          onSelectForEditing={handleSelectForEditing}
-          onDelete={handleDeleteCreation}
-          onCreationClick={setLightboxContent}
-        />
+        <Workspace userName={userName} creations={savedCreations} onSelectForEditing={handleSelectForEditing} onDelete={handleDeleteCreation} onCreationClick={setLightboxContent}/>
       </main>
     </div>
   );

@@ -12,7 +12,7 @@ import { WorkspaceCreation } from '../types';
 interface WorkspaceProps {
   userName: string;
   creations: WorkspaceCreation[];
-  onSelectForEditing: (base64: string) => void;
+  onSelectForEditing: (base64DataUrl: string) => void;
   onDelete: (id: number) => void;
   onCreationClick: (creation: WorkspaceCreation) => void;
 }
@@ -21,12 +21,10 @@ export const Workspace: React.FC<WorkspaceProps> = ({ userName, creations, onSel
   const [copiedId, setCopiedId] = useState<number | null>(null);
 
   const handleDownload = (creation: WorkspaceCreation) => {
-    const isVideo = creation.type === 'video';
-    const extension = isVideo ? 'mp4' : 'png';
-    const dataUrl = isVideo ? creation.base64 : `data:image/png;base64,${creation.base64}`;
+    const extension = creation.type === 'video' ? 'mp4' : 'png';
     
     const link = document.createElement('a');
-    link.href = dataUrl;
+    link.href = creation.base64; // base64 is already a full data URL
     link.download = `creation-${creation.id}.${extension}`;
     document.body.appendChild(link);
     link.click();
@@ -35,14 +33,11 @@ export const Workspace: React.FC<WorkspaceProps> = ({ userName, creations, onSel
 
   const handleCopy = async (creation: WorkspaceCreation) => {
     if (creation.type === 'video') {
-      // Cannot copy video to clipboard via this method.
-      // You could copy the data URL as text if needed.
       console.warn("비디오 복사는 지원되지 않습니다.");
       return;
     }
     try {
-      const dataUrl = `data:image/png;base64,${creation.base64}`;
-      const response = await fetch(dataUrl);
+      const response = await fetch(creation.base64); // creation.base64 is a data URL
       const blob = await response.blob();
       await navigator.clipboard.write([
         new ClipboardItem({
@@ -91,7 +86,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({ userName, creations, onSel
           >
             {creation.type === 'image' ? (
               <img
-                src={`data:image/png;base64,${creation.base64}`}
+                src={creation.base64}
                 alt={`생성된 아트 ${creation.id}`}
                 className="w-full h-full object-contain rounded-lg border-2 border-transparent group-hover:border-purple-400 transition-all"
               />

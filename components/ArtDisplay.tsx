@@ -13,11 +13,27 @@ interface ArtDisplayProps {
   onImageClick: (image: string) => void;
 }
 
-const LoadingSpinner: React.FC<{ message: string }> = ({ message }) => (
-    <div className="flex flex-col items-center justify-center gap-4">
-        <div className="w-16 h-16 border-4 border-dashed rounded-full animate-spin border-purple-400"></div>
-        <p className="text-gray-400 font-semibold text-lg">{message || '아티스트가 그림을 그리고 있습니다...'}</p>
+const LoadingIndicator: React.FC<{ message: string }> = ({ message }) => (
+  <div className="flex flex-col items-center justify-center gap-6 text-center">
+    <div className="flex items-center justify-center space-x-2">
+        <div className="w-4 h-4 rounded-full bg-purple-400 animate-[pulse_1.4s_ease-in-out_infinite]"></div>
+        <div className="w-4 h-4 rounded-full bg-purple-400 animate-[pulse_1.4s_ease-in-out_0.2s_infinite]"></div>
+        <div className="w-4 h-4 rounded-full bg-purple-400 animate-[pulse_1.4s_ease-in-out_0.4s_infinite]"></div>
     </div>
+    <p className="text-gray-400 font-semibold text-lg px-4">{message || '아티스트가 그림을 그리고 있습니다...'}</p>
+    <style>{`
+      @keyframes pulse {
+        0%, 80%, 100% {
+          transform: scale(1);
+          opacity: 1;
+        }
+        40% {
+          transform: scale(0.5);
+          opacity: 0.5;
+        }
+      }
+    `}</style>
+  </div>
 );
 
 export const ArtDisplay: React.FC<ArtDisplayProps> = ({ images, isLoading, error, loadingMessage, onSave, onImageClick }) => {
@@ -53,7 +69,7 @@ export const ArtDisplay: React.FC<ArtDisplayProps> = ({ images, isLoading, error
     <div className="w-full lg:w-1/2 flex flex-col gap-4">
       <div className="w-full bg-gray-900/50 rounded-2xl flex items-center justify-center p-4 border border-gray-700 shadow-2xl shadow-purple-900/20 min-h-[32rem]">
         {isLoading ? (
-          <LoadingSpinner message={loadingMessage} />
+          <LoadingIndicator message={loadingMessage} />
         ) : error ? (
           <div className="text-center text-red-400">
             <h3 className="text-xl font-bold">오류가 발생했습니다</h3>

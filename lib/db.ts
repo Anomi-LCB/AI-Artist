@@ -1,4 +1,5 @@
 import { WorkspaceCreation } from '../types';
+import { blobToBase64 } from '../utils/fileUtils';
 
 const DB_NAME = 'AIArtistDB';
 const STORE_NAME = 'creations';
@@ -26,12 +27,24 @@ const openDB = (): Promise<IDBDatabase> => {
   });
 };
 
-export const addCreation = async (base64: string, type: 'image' | 'video'): Promise<void> => {
+export const addCreation = async (data: string | Blob, type: 'image' | 'video'): Promise<void> => {
   const db = await openDB();
-  return new Promise((resolve, reject) => {
+  return new Promise(async (resolve, reject) => {
+    let base64Data: string;
+    if (type === 'image') {
+        // Workspace expects a data URL, so ensure it's formatted correctly
+        if (typeof data === 'string' && !data.startsWith('data:')) {
+            base64Data = `data:image/png;base64,${data}`;
+        } else {
+            base64Data = data as string;
+        }
+    } else {
+        base64Data = await blobToBase64(data as Blob);
+    }
+
     const transaction = db.transaction(STORE_NAME, 'readwrite');
     const store = transaction.objectStore(STORE_NAME);
-    const newCreation = { base64, type, createdAt: new Date() };
+    const newCreation = { base64: base64Data, type, createdAt: new Date() };
     const request = store.add(newCreation);
 
     request.onsuccess = () => resolve();
