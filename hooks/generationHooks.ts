@@ -1,8 +1,9 @@
+
+
 import { useState, useCallback, useReducer, useEffect } from 'react';
-import { generateArt, generateVideo, expandPrompt } from '../services/geminiService';
+import { generateArt, generateVideo, expandPrompt, decomposeImage, composeImages } from '../services/geminiService';
 import { fileToBase64 } from '../utils/fileUtils';
-import { ArtStyleId, QualityId, AppSettings, ImageAspectRatio, AspectRatio, Resolution } from '../types';
-import { inspirationalPrompts } from '../constants';
+import { ArtStyleId, QualityId, AppSettings, ImageAspectRatio, AspectRatio, Resolution, DecomposedImageElement } from '../types';
 
 // --- IMAGE GENERATION HOOK ---
 
@@ -49,7 +50,6 @@ interface UseImageGenerationProps {
   setIsLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   setLoadingMessage: (message: string) => void;
-  // FIX: Removed setGeneratedImages prop to make the hook self-contained
 }
 
 export const useImageGeneration = ({ appSettings, setIsLoading, setError, setLoadingMessage }: UseImageGenerationProps) => {
@@ -68,21 +68,7 @@ export const useImageGeneration = ({ appSettings, setIsLoading, setError, setLoa
   const [baseImageFiles, setBaseImageFiles] = useState<File[]>([]);
   const [isBaseImageHighlighted, setIsBaseImageHighlighted] = useState<boolean>(false);
   const [referenceImageFiles, setReferenceImageFiles] = useState<File[]>([]);
-  const [generatedImages, _setGeneratedImages] = useState<string[]>([]);
-
-  const handlePromptExpansion = useCallback(async () => {
-    if (!imageGenState.prompt.trim()) return;
-    setError(null);
-    setIsLoading(true);
-    try {
-      const expanded = await expandPrompt(imageGenState.prompt, setLoadingMessage);
-      dispatchImageGenState({ type: 'SET_PROMPT_EXPANSION', prompt: expanded, originalPrompt: imageGenState.prompt });
-    } catch (err) {
-      setError((err as Error).message || '프롬프트 확장에 실패했습니다.');
-    } finally {
-      setIsLoading(false);
-    }
-  }, [imageGenState.prompt, setIsLoading, setError, setLoadingMessage]);
+  const [generatedImages, setGeneratedImages] = useState<string[]>([]);
 
   const handleImageGenerate = useCallback(async () => {
     if (!imageGenState.prompt.trim() && baseImageFiles.length === 0 && referenceImageFiles.length === 0) {
@@ -90,25 +76,32 @@ export const useImageGeneration = ({ appSettings, setIsLoading, setError, setLoa
       return;
     }
     setError(null);
-    // FIX: Use internal state setter `_setGeneratedImages`
-    _setGeneratedImages([]);
+    setGeneratedImages([]);
     setIsLoading(true);
     setIsBaseImageHighlighted(false);
-    setLoadingMessage('생성을 시작합니다...');
+    
     try {
+      let finalPrompt = imageGenState.prompt;
+
+      if (imageGenState.isPromptExpansionEnabled && imageGenState.prompt.trim() && !imageGenState.originalPrompt) {
+        const expanded = await expandPrompt(imageGenState.prompt, setLoadingMessage);
+        finalPrompt = expanded;
+        dispatchImageGenState({ type: 'SET_PROMPT_EXPANSION', prompt: expanded, originalPrompt: imageGenState.prompt });
+      } else {
+        setLoadingMessage('생성을 시작합니다...');
+      }
+
       const baseImageUploads = await Promise.all(baseImageFiles.map(async (file) => ({ mimeType: file.type, data: await fileToBase64(file) })));
       const referenceImageUploads = await Promise.all(referenceImageFiles.map(async (file) => ({ mimeType: file.type, data: await fileToBase64(file) })));
-      const results = await generateArt(imageGenState.prompt, baseImageUploads, referenceImageUploads, setLoadingMessage, imageGenState.artStyle, imageGenState.numOutputs, imageGenState.quality, imageGenState.negativePrompt, imageGenState.imageAspectRatio);
-      // FIX: Use internal state setter `_setGeneratedImages`
-      _setGeneratedImages(results);
+      const results = await generateArt(finalPrompt, baseImageUploads, referenceImageUploads, setLoadingMessage, imageGenState.artStyle, imageGenState.numOutputs, imageGenState.quality, imageGenState.negativePrompt, imageGenState.imageAspectRatio);
+      setGeneratedImages(results);
     } catch (err: any) {
       setError(err.message || '알 수 없는 오류가 발생했습니다.');
     } finally {
       setIsLoading(false);
       setLoadingMessage('');
     }
-    // FIX: Update dependency array to use `_setGeneratedImages`
-  }, [imageGenState, baseImageFiles, referenceImageFiles, setIsLoading, setError, setLoadingMessage, _setGeneratedImages]);
+  }, [imageGenState, baseImageFiles, referenceImageFiles, setIsLoading, setError, setLoadingMessage]);
 
   const isImageGenerateDisabled = !imageGenState.prompt.trim() && baseImageFiles.length === 0 && referenceImageFiles.length === 0;
 
@@ -122,10 +115,9 @@ export const useImageGeneration = ({ appSettings, setIsLoading, setError, setLoa
     referenceImageFiles,
     setReferenceImageFiles,
     generatedImages,
+    setGeneratedImages,
     handleImageGenerate,
-    handlePromptExpansion,
     isImageGenerateDisabled,
-    setGeneratedImages: _setGeneratedImages
   };
 };
 
@@ -134,10 +126,7 @@ export const useImageGeneration = ({ appSettings, setIsLoading, setError, setLoa
 
 interface VideoGenState {
     prompt: string;
-    backgroundImageFile: File[];
-    characterImageFile: File[];
-    otherImageFile: File[];
-    otherImageComment: string;
+    referenceImageFiles: File[];
     generatedVideoUrl: string | null;
     aspectRatio: AspectRatio;
     resolution: Resolution;
@@ -145,7 +134,6 @@ interface VideoGenState {
 }
 
 interface UseVideoGenerationProps {
-    // FIX: Add isLoading to props
     isLoading: boolean;
     setIsLoading: (loading: boolean) => void;
     setError: (error: string | null) => void;
@@ -156,10 +144,7 @@ interface UseVideoGenerationProps {
 export const useVideoGeneration = ({ isLoading, setIsLoading, setError, setLoadingMessage, setGeneratedVideoUrl }: UseVideoGenerationProps) => {
     const [videoState, setVideoState] = useState<VideoGenState>({
         prompt: '',
-        backgroundImageFile: [],
-        characterImageFile: [],
-        otherImageFile: [],
-        otherImageComment: '',
+        referenceImageFiles: [],
         generatedVideoUrl: null,
         aspectRatio: '16:9',
         resolution: '1080p',
@@ -167,24 +152,22 @@ export const useVideoGeneration = ({ isLoading, setIsLoading, setError, setLoadi
     });
     const [isVeoKeyReady, setIsVeoKeyReady] = useState(false);
     
-    const allVideoImageFiles = [...videoState.backgroundImageFile, ...videoState.characterImageFile, ...videoState.otherImageFile];
-
     useEffect(() => {
-        const multiImage = allVideoImageFiles.length > 1;
+        const multiImage = videoState.referenceImageFiles.length > 1;
         setVideoState(prev => ({
             ...prev,
             isMultiImageMode: multiImage,
             aspectRatio: multiImage ? '16:9' : prev.aspectRatio,
             resolution: multiImage ? '720p' : prev.resolution,
         }));
-    }, [allVideoImageFiles.length]);
+    }, [videoState.referenceImageFiles.length]);
 
     const handleVideoGenerate = useCallback(async () => {
         if (!isVeoKeyReady) {
             setError('비디오 생성을 계속하려면 VEO API 키를 선택해야 합니다.');
             return;
         }
-        if (allVideoImageFiles.length === 0 && !videoState.prompt.trim()) {
+        if (videoState.referenceImageFiles.length === 0 && !videoState.prompt.trim()) {
             setError('비디오를 생성하려면 참고 이미지를 업로드하거나 시나리오를 입력해야 합니다.');
             return;
         }
@@ -193,23 +176,8 @@ export const useVideoGeneration = ({ isLoading, setIsLoading, setError, setLoadi
         setIsLoading(true);
         setLoadingMessage('생성을 시작합니다...');
         try {
-            const imageUploads = await Promise.all(allVideoImageFiles.map(async (file) => ({ mimeType: file.type, data: await fileToBase64(file) })));
-            let finalPrompt: string;
-
-            if (videoState.isMultiImageMode) {
-              let promptSegments: string[] = [];
-              if (videoState.characterImageFile.length > 0) promptSegments.push("featuring the provided character image(s) as the main character");
-              if (videoState.backgroundImageFile.length > 0) promptSegments.push("set within the provided background image(s)");
-              if (videoState.otherImageFile.length > 0) {
-                  const comment = videoState.otherImageComment.trim() ? ` (noted as: '${videoState.otherImageComment.trim()}')` : '';
-                  promptSegments.push(`utilizing elements from the other provided image(s)${comment}`);
-              }
-              const imageDescription = promptSegments.length > 0 ? `Animate a video based on the provided images. ` : '';
-              const userScenario = videoState.prompt || 'Animate these images together creatively.';
-              finalPrompt = `${imageDescription}The video's narrative should follow this scenario: "${userScenario}"`;
-            } else {
-                finalPrompt = videoState.prompt || 'Bring this image to life.';
-            }
+            const imageUploads = await Promise.all(videoState.referenceImageFiles.map(async (file) => ({ mimeType: file.type, data: await fileToBase64(file) })));
+            const finalPrompt = videoState.prompt || 'Bring this image to life, animating it creatively.';
 
             const resultBlob = await generateVideo(finalPrompt, imageUploads, videoState.aspectRatio, videoState.resolution, setLoadingMessage);
             const videoDataUrl = URL.createObjectURL(resultBlob);
@@ -223,10 +191,9 @@ export const useVideoGeneration = ({ isLoading, setIsLoading, setError, setLoadi
             setIsLoading(false);
             setLoadingMessage('');
         }
-    }, [isVeoKeyReady, allVideoImageFiles, videoState, setIsLoading, setError, setLoadingMessage, setGeneratedVideoUrl]);
+    }, [isVeoKeyReady, videoState, setIsLoading, setError, setLoadingMessage, setGeneratedVideoUrl]);
 
-    // FIX: Use `isLoading` from props to correctly calculate disabled state.
-    const isVideoGenerateDisabled = isLoading || !isVeoKeyReady || (allVideoImageFiles.length === 0 && !videoState.prompt.trim());
+    const isVideoGenerateDisabled = isLoading || !isVeoKeyReady || (videoState.referenceImageFiles.length === 0 && !videoState.prompt.trim());
 
     return {
         videoState,
@@ -236,4 +203,135 @@ export const useVideoGeneration = ({ isLoading, setIsLoading, setError, setLoadi
         setIsVeoKeyReady,
         isVideoGenerateDisabled,
     }
+};
+
+// --- IMAGE DECOMPOSITION HOOK ---
+
+interface DecompositionState {
+  inputFile: File | null;
+  decomposedElements: DecomposedImageElement[];
+}
+
+interface UseImageDecompositionProps {
+  setIsLoading: (loading: boolean) => void;
+  setError: (error: string | null) => void;
+  setLoadingMessage: (message: string) => void;
+}
+
+export const useImageDecomposition = ({ setIsLoading, setError, setLoadingMessage }: UseImageDecompositionProps) => {
+  const [decompositionState, setDecompositionState] = useState<DecompositionState>({
+    inputFile: null,
+    decomposedElements: [],
+  });
+
+  const setDecompositionInputFile = (file: File | null) => {
+    setDecompositionState({ inputFile: file, decomposedElements: [] });
+    setError(null);
+  };
+
+  const handleDecompose = useCallback(async () => {
+    if (!decompositionState.inputFile) {
+      setError('분해할 이미지를 업로드해주세요.');
+      return;
+    }
+    setError(null);
+    setDecompositionState(prev => ({ ...prev, decomposedElements: [] }));
+    setIsLoading(true);
+    setLoadingMessage('분해 작업을 준비 중입니다...');
+
+    try {
+      const baseImage = {
+        mimeType: decompositionState.inputFile.type,
+        data: await fileToBase64(decompositionState.inputFile),
+      };
+
+      const elements = await decomposeImage(baseImage, setLoadingMessage);
+      setDecompositionState(prev => ({ ...prev, decomposedElements: elements }));
+
+    } catch (err: any) {
+      setError(err.message || '알 수 없는 오류가 발생했습니다.');
+      setDecompositionState(prev => ({ ...prev, decomposedElements: [] }));
+    } finally {
+      setIsLoading(false);
+      setLoadingMessage('');
+    }
+  }, [decompositionState.inputFile, setIsLoading, setError, setLoadingMessage]);
+
+  const isDecompositionDisabled = !decompositionState.inputFile;
+
+  return {
+    decompositionState,
+    setDecompositionInputFile,
+    handleDecompose,
+    isDecompositionDisabled,
+  };
+};
+
+// --- IMAGE COMPOSITION HOOK ---
+
+interface CompositionState {
+  inputFiles: File[];
+  composedImage: string | null;
+}
+
+interface UseImageCompositionProps {
+  setIsLoading: (loading: boolean) => void;
+  setError: (error: string | null) => void;
+  setLoadingMessage: (message: string) => void;
+}
+
+export const useImageComposition = ({ setIsLoading, setError, setLoadingMessage }: UseImageCompositionProps) => {
+  const [compositionState, setCompositionState] = useState<CompositionState>({
+    inputFiles: [],
+    composedImage: null,
+  });
+
+  const setCompositionInputFiles = (files: File[]) => {
+    setCompositionState({ inputFiles: files, composedImage: null });
+    setError(null);
+  };
+
+  const handleCompose = useCallback(async () => {
+    if (compositionState.inputFiles.length < 2) {
+      setError('합성하려면 2개 이상의 이미지를 업로드해주세요.');
+      return;
+    }
+    setError(null);
+    setCompositionState(prev => ({ ...prev, composedImage: null }));
+    setIsLoading(true);
+    setLoadingMessage('합성 작업을 준비 중입니다...');
+
+    try {
+      const imageUploads = await Promise.all(
+        compositionState.inputFiles.map(async (file) => ({
+          mimeType: file.type,
+          data: await fileToBase64(file),
+        }))
+      );
+
+      const [result] = await composeImages(imageUploads, setLoadingMessage);
+      
+      if (result) {
+        setCompositionState(prev => ({ ...prev, composedImage: result }));
+      } else {
+        throw new Error('AI가 합성된 이미지를 반환하지 않았습니다.');
+      }
+
+    } catch (err: any) {
+      setError(err.message || '알 수 없는 오류가 발생했습니다.');
+      setCompositionState(prev => ({ ...prev, composedImage: null }));
+    } finally {
+      setIsLoading(false);
+      setLoadingMessage('');
+    }
+  }, [compositionState.inputFiles, setIsLoading, setError, setLoadingMessage]);
+
+  const isCompositionDisabled = compositionState.inputFiles.length < 2;
+
+  return {
+    compositionState,
+    setCompositionInputFiles,
+    handleCompose,
+    isCompositionDisabled,
+  };
 };

@@ -21,10 +21,7 @@ const styleVisuals: { [key in ArtStyleId]: string } = {
 
 export const StyleCard: React.FC<StyleCardProps> = ({ id, label, isSelected, onClick, disabled }) => {
   const visualClass = styleVisuals[id] || 'from-gray-500 to-gray-700';
-
-  const ringClass = isSelected ? 'ring-4 ring-purple-500' : 'ring-2 ring-transparent group-hover:ring-purple-400';
   const textClass = isSelected ? 'text-white' : 'text-gray-200';
-  const shadowClass = isSelected ? 'shadow-lg shadow-purple-500/50' : '';
   const gradientOpacityClass = isSelected ? 'opacity-100' : 'opacity-80 group-hover:opacity-100';
 
   return (
@@ -32,19 +29,17 @@ export const StyleCard: React.FC<StyleCardProps> = ({ id, label, isSelected, onC
       onClick={() => onClick(id)}
       disabled={disabled}
       aria-pressed={isSelected}
-      title={id} // Tooltip added to show the full style name (from id)
+      title={id}
       className={`
-        group relative flex-shrink-0 w-14 h-16 rounded-lg focus:outline-none 
+        group relative p-0.5 flex-shrink-0 w-14 h-16 rounded-lg focus:outline-none 
         transition-all duration-300 ease-in-out
-        disabled:opacity-50 disabled:cursor-not-allowed transform 
-        ${ringClass} 
-        ${shadowClass}
-        ${isSelected ? 'scale-105' : 'group-hover:scale-105'}
+        disabled:opacity-50 disabled:cursor-not-allowed
+        ${isSelected ? 'bg-gradient-to-br from-purple-500 to-teal-400' : 'bg-transparent'}
       `}
     >
-      <div className={`absolute inset-0 bg-gradient-to-br ${visualClass} rounded-lg ${gradientOpacityClass} transition-opacity duration-300`}></div>
-      <div className="relative w-full h-full flex items-center justify-center p-1 text-center">
-        <span className={`text-xs font-bold leading-tight drop-shadow-md whitespace-pre-line ${textClass}`}>{label}</span>
+      <div className="relative w-full h-full bg-gray-800 rounded-[5px] flex items-center justify-center p-1 text-center transition-colors group-hover:bg-gray-700">
+        <div className={`absolute inset-0 bg-gradient-to-br ${visualClass} rounded-[5px] ${gradientOpacityClass} transition-opacity duration-300`}></div>
+        <span className={`relative text-xs font-bold leading-tight drop-shadow-md whitespace-pre-line ${textClass}`}>{label}</span>
       </div>
     </button>
   );

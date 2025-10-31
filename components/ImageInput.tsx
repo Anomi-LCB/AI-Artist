@@ -8,13 +8,13 @@ interface ImageInputProps {
   isLoading: boolean;
   maxFiles?: number;
   highlight?: boolean;
+  replace?: boolean;
 }
 
 const FilePreview: React.FC<{ file: File; onRemove: () => void; highlight: boolean; }> = ({ file, onRemove, highlight }) => {
   const [preview, setPreview] = useState<string | null>(null);
 
   useEffect(() => {
-    // Ensure the file is an image before creating a preview
     if (!file.type.startsWith('image/')) return;
 
     const reader = new FileReader();
@@ -36,7 +36,7 @@ const FilePreview: React.FC<{ file: File; onRemove: () => void; highlight: boole
 
   return (
     <div className={containerClasses}>
-      <img src={preview} alt={file.name} className="w-full h-full object-cover rounded-md border border-gray-700" />
+      <img src={preview} alt={file.name} className="w-full h-full object-cover rounded-md border border-[var(--border-color)]" />
       <button
         onClick={onRemove}
         className="absolute top-1 right-1 bg-black/60 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity focus:opacity-100"
@@ -51,7 +51,7 @@ const FilePreview: React.FC<{ file: File; onRemove: () => void; highlight: boole
 };
 
 
-export const ImageInput: React.FC<ImageInputProps> = ({ files, onFilesChange, isLoading, maxFiles, highlight }) => {
+export const ImageInput: React.FC<ImageInputProps> = ({ files, onFilesChange, isLoading, maxFiles, highlight, replace = false }) => {
   const [error, setError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const inputId = useId();
@@ -80,12 +80,6 @@ export const ImageInput: React.FC<ImageInputProps> = ({ files, onFilesChange, is
     const newFiles = Array.from(incomingFiles);
     if (newFiles.length === 0) return;
   
-    const currentFileCount = files.length;
-    if (maxFiles && currentFileCount >= maxFiles) {
-      displayError(`최대 ${maxFiles}개의 이미지만 업로드할 수 있습니다.`);
-      return;
-    }
-  
     const validNewFiles = newFiles.filter(f => {
       if (!f.type.startsWith('image/')) {
         displayError('일부 파일은 유효한 이미지가 아니므로 무시되었습니다.');
@@ -96,25 +90,40 @@ export const ImageInput: React.FC<ImageInputProps> = ({ files, onFilesChange, is
   
     if (validNewFiles.length === 0) return;
   
+    if (replace) {
+      // In replace mode, just take the last valid file and call onFilesChange.
+      const fileToSet = validNewFiles.slice(-1);
+      onFilesChange(fileToSet);
+      setError(null);
+      return;
+    }
+
+    // Existing logic for appending
+    const currentFileCount = files.length;
+    if (maxFiles && currentFileCount >= maxFiles) {
+      displayError(`최대 ${maxFiles}개의 이미지만 업로드할 수 있습니다.`);
+      return;
+    }
+  
     let filesToAdd = validNewFiles;
     if (maxFiles && (currentFileCount + validNewFiles.length) > maxFiles) {
       const slotsAvailable = maxFiles - currentFileCount;
       filesToAdd = validNewFiles.slice(0, slotsAvailable);
       displayError(`최대 ${maxFiles}개의 이미지만 업로드할 수 있습니다. ${filesToAdd.length}개의 이미지가 추가되었습니다.`);
     } else {
-      setError(null); // Clear previous errors if successful
+      setError(null);
     }
   
     if (filesToAdd.length > 0) {
       onFilesChange([...files, ...filesToAdd]);
     }
-  }, [files, onFilesChange, maxFiles, displayError]);
+  }, [files, onFilesChange, maxFiles, displayError, replace]);
 
   const handleFileChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     if (event.target.files) {
       processFiles(event.target.files);
     }
-    event.target.value = ''; // Allow re-selecting the same file
+    event.target.value = '';
   }, [processFiles]);
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {
@@ -151,18 +160,18 @@ export const ImageInput: React.FC<ImageInputProps> = ({ files, onFilesChange, is
 
   const dropzoneClasses = `
     relative flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-lg cursor-pointer 
-    transition-colors
-    ${isLoading ? 'cursor-not-allowed bg-gray-800/50 border-gray-700' :
+    transition-all
+    ${isLoading ? 'cursor-not-allowed bg-black/20 border-gray-700' :
       isDragging 
-        ? 'border-purple-400 bg-gray-700' 
-        : 'bg-gray-800/50 border-gray-600 hover:border-purple-400 hover:bg-gray-800'
+        ? 'border-purple-400 bg-purple-900/20' 
+        : 'bg-black/20 border-gray-600 hover:border-purple-400 hover:bg-black/30'
     }
   `;
 
   return (
     <div className="w-full">
        {files.length > 0 && (
-        <div className="flex flex-wrap gap-3 mb-3 p-2 bg-gray-900/50 rounded-lg">
+        <div className="flex flex-wrap gap-3 mb-3 p-2 bg-black/20 rounded-lg">
             {files.map((file, index) => (
                 <FilePreview 
                   key={`${file.name}-${index}`} 

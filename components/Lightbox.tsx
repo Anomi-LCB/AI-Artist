@@ -1,12 +1,18 @@
+
 import React, { useEffect } from 'react';
-import { WorkspaceCreation } from '../types';
+import { LightboxContent } from '../types';
+import { DownloadIcon } from './icons/DownloadIcon';
+import { SparklesIcon } from './icons/SparklesIcon';
+import { SendToCanvasIcon } from './icons/SendToCanvasIcon';
 
 interface LightboxProps {
-  creation: WorkspaceCreation | null;
+  content: LightboxContent | null;
   onClose: () => void;
+  onSave: (content: LightboxContent) => void;
+  onUse: (content: LightboxContent) => void;
 }
 
-export const Lightbox: React.FC<LightboxProps> = ({ creation, onClose }) => {
+export const Lightbox: React.FC<LightboxProps> = ({ content, onClose, onSave, onUse }) => {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -17,36 +23,86 @@ export const Lightbox: React.FC<LightboxProps> = ({ creation, onClose }) => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
 
-  if (!creation) {
+  if (!content) {
     return null;
   }
 
+  const handleDownload = () => {
+    if (!content) return;
+    const link = document.createElement('a');
+    link.href = content.base64;
+    link.download = content.downloadName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleSave = () => {
+    if (content) {
+      onSave(content);
+    }
+  };
+  
+  const handleUse = () => {
+    if (content) {
+      onUse(content);
+    }
+  };
+
+
   return (
     <div
-      className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50 animate-fade-in"
+      className="fixed inset-0 bg-black/80 backdrop-blur-md flex flex-col items-center justify-center z-50 animate-fade-in p-4"
       onClick={onClose}
       aria-modal="true"
       role="dialog"
     >
       <div
-        className="relative w-full h-full max-w-4xl max-h-[90vh] p-4"
-        onClick={(e) => e.stopPropagation()} // Prevent closing when clicking on the content
+        className="relative w-full h-full max-w-4xl max-h-[85vh]"
+        onClick={(e) => e.stopPropagation()} 
       >
-        {creation.type === 'image' ? (
+        {content.type === 'image' || content.type === 'decomposed' ? (
           <img
-            src={creation.base64} // base64 is already a data URL for images from workspace
-            alt="Enlarged creation"
+            src={content.base64}
+            alt="Enlarged content"
             className="w-full h-full object-contain"
           />
         ) : (
           <video
-            src={creation.base64}
+            src={content.base64}
             controls
             autoPlay
             loop
             className="w-full h-full object-contain"
           />
         )}
+      </div>
+      <div className="flex-shrink-0 mt-4 flex items-center gap-4" onClick={(e) => e.stopPropagation()}>
+          {content.type === 'decomposed' && (
+             <button
+                onClick={handleUse}
+                className="flex items-center justify-center gap-2 bg-purple-600 text-white font-bold py-2 px-5 rounded-lg hover:bg-purple-700 shadow-lg hover:shadow-purple-500/50 transition-all duration-300"
+              >
+                <SendToCanvasIcon className="w-5 h-5" />
+                <span>생성에 사용</span>
+              </button>
+          )}
+          <button
+            onClick={handleDownload}
+            className="flex items-center justify-center gap-2 bg-gray-700/50 text-gray-200 font-semibold py-2 px-5 rounded-lg hover:bg-gray-600/50 border border-gray-600 transition-all duration-300"
+          >
+            <DownloadIcon className="w-5 h-5" />
+            <span>다운로드</span>
+          </button>
+           {(content.type === 'image' || content.type === 'decomposed') && (
+              <button
+                onClick={handleSave}
+                className="flex items-center justify-center gap-2 bg-gradient-to-r from-purple-600 to-teal-500 text-white font-bold py-2 px-5 rounded-lg hover:from-purple-700 hover:to-teal-600 shadow-lg hover:shadow-purple-500/50 transition-all duration-300"
+              >
+                <SparklesIcon className="w-5 h-5" />
+                <span>워크스페이스에 저장</span>
+              </button>
+           )}
       </div>
       <button
         onClick={onClose}

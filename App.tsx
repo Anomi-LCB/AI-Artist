@@ -5,25 +5,31 @@ import { Header } from './components/Header';
 import { ImageInput } from './components/ImageInput';
 import { ArtDisplay } from './components/ArtDisplay';
 import { VideoDisplay } from './components/VideoDisplay';
+import { ExtractionDisplay } from './components/ExtractionDisplay';
+import { CompositionDisplay } from './components/CompositionDisplay';
 import { SparklesIcon } from './components/icons/SparklesIcon';
 import { PhotoIcon } from './components/icons/PhotoIcon';
 import { VideoCameraIcon } from './components/icons/VideoCameraIcon';
+import { ExtractIcon } from './components/icons/ExtractIcon';
+import { CombineIcon } from './components/icons/CombineIcon';
 import { UndoIcon } from './components/icons/UndoIcon';
 import { InfoIcon } from './components/icons/InfoIcon';
-import { useImageGeneration, useVideoGeneration } from './hooks/generationHooks';
+import { useImageGeneration, useVideoGeneration, useImageDecomposition, useImageComposition } from './hooks/generationHooks';
 import { base64ToFile } from './utils/fileUtils';
 import { Workspace } from './components/Workspace';
 import { StyleSelector } from './components/StyleSelector';
 import { SettingsModal } from './components/SettingsModal';
 import { Lightbox } from './components/Lightbox';
-import { WorkspaceCreation, AppSettings } from './types';
-// FIX: import inspirationalPrompts
+import { WorkspaceCreation, AppSettings, ToastMessage, DecomposedImageElement, LightboxContent } from './types';
 import { artStyleOptions, qualityOptions, imageAspectRatioOptions, inspirationalPrompts } from './constants';
 import { getAllCreations, addCreation, deleteCreation, clearAllCreations } from './lib/db';
-import { LoginPage } from './components/LoginPage';
 import { GettingStartedPage } from './components/GettingStartedPage';
+import { Toast } from './components/Toast';
+import { InspirationDisplay } from './components/InspirationDisplay';
+import { LightbulbIcon } from './components/icons/LightbulbIcon';
+import { TrashIcon } from './components/icons/TrashIcon';
 
-type Mode = 'image' | 'video';
+type Mode = 'image' | 'composition' | 'video' | 'decomposition';
 
 const SETTINGS_STORAGE_KEY = 'gemini-artist-settings';
 
@@ -35,8 +41,6 @@ const DEFAULT_SETTINGS: AppSettings = {
 };
 
 const App: React.FC = () => {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
-  const [userName, setUserName] = useState<string>('');
   const [hasStarted, setHasStarted] = useState<boolean>(false);
   const [mode, setMode] = useState<Mode>('image');
   
@@ -46,8 +50,18 @@ const App: React.FC = () => {
   const [loadingMessage, setLoadingMessage] = useState<string>('');
   const [appSettings, setAppSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [lightboxContent, setLightboxContent] = useState<WorkspaceCreation | null>(null);
+  const [lightboxContent, setLightboxContent] = useState<LightboxContent | null>(null);
   const [savedCreations, setSavedCreations] = useState<WorkspaceCreation[]>([]);
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const [editingCreationId, setEditingCreationId] = useState<number | null>(null);
+
+  const addToast = useCallback((message: string, type: 'success' | 'error') => {
+    const id = Date.now();
+    setToasts(prevToasts => [...prevToasts, { id, message, type }]);
+    setTimeout(() => {
+      setToasts(prevToasts => prevToasts.filter(toast => toast.id !== id));
+    }, 5000);
+  }, []);
 
   // Image Generation Hook
   const {
@@ -60,12 +74,9 @@ const App: React.FC = () => {
     referenceImageFiles,
     setReferenceImageFiles,
     generatedImages,
-    // FIX: Destructure setGeneratedImages from the hook to manage state correctly
     setGeneratedImages,
     handleImageGenerate,
-    handlePromptExpansion,
     isImageGenerateDisabled
-    // FIX: Remove the incorrect setGeneratedImages prop. The hook now manages its own state.
   } = useImageGeneration({ appSettings, setIsLoading, setError, setLoadingMessage });
   
   // Video Generation Hook
@@ -76,24 +87,56 @@ const App: React.FC = () => {
     isVeoKeyReady,
     setIsVeoKeyReady,
     isVideoGenerateDisabled
-    // FIX: Pass isLoading state to the hook for correct disabled logic
   } = useVideoGeneration({ isLoading, setIsLoading, setError, setLoadingMessage, setGeneratedVideoUrl: (url) => {
     if(url) {
-        // We get a blob URL which we need to save to IndexedDB
-        fetch(url).then(res => res.blob()).then(blob => handleSaveCreation(blob, 'video'));
+        fetch(url).then(res => res.blob()).then(blob => handleSaveCreation(blob, 'video', true));
     }
     setVideoState(prev => ({ ...prev, generatedVideoUrl: url }));
   }});
 
+  // Image Decomposition Hook
+  const {
+    decompositionState,
+    handleDecompose,
+    setDecompositionInputFile,
+    isDecompositionDisabled
+  } = useImageDecomposition({ setIsLoading, setError, setLoadingMessage });
+
+  // Image Composition Hook
+  const {
+    compositionState,
+    setCompositionInputFiles,
+    handleCompose,
+    isCompositionDisabled,
+  } = useImageComposition({ setIsLoading, setError, setLoadingMessage });
+
+  const handleUseDecomposedElement = useCallback(async (element: DecomposedImageElement) => {
+    try {
+        setMode('image');
+        const file = await base64ToFile(element.base64, `${element.name}.png`, 'image/png');
+        setBaseImageFiles([file]);
+        setIsBaseImageHighlighted(true);
+        setReferenceImageFiles([]);
+        dispatchImageGenState({ type: 'SET_FIELD', field: 'prompt', value: `배경에 ${element.name}을(를) 활용한 장면` });
+        setGeneratedImages([]);
+        setError(null);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        addToast('분해된 요소를 편집용으로 불러왔습니다.', 'success');
+    } catch (err) {
+        addToast('요소를 불러오지 못했습니다.', 'error');
+    }
+  }, [setBaseImageFiles, dispatchImageGenState, setGeneratedImages, setIsBaseImageHighlighted, addToast]);
+
+  const handleUseFromLightbox = (content: LightboxContent) => {
+    if (content.type === 'decomposed' && content.saveData) {
+      handleUseDecomposedElement(content.saveData);
+      setLightboxContent(null);
+    }
+  };
+
 
   // Check for session on mount
   useEffect(() => {
-    const loggedIn = sessionStorage.getItem('isAuthenticated');
-    const name = localStorage.getItem('userName');
-    if (loggedIn === 'true' && name) {
-      setIsAuthenticated(true);
-      setUserName(name);
-    }
     const started = sessionStorage.getItem('hasStarted');
     if (started === 'true') {
       setHasStarted(true);
@@ -103,7 +146,7 @@ const App: React.FC = () => {
   // Check for VEO key when mode changes
   useEffect(() => {
     const checkVeoKey = async () => {
-      if (mode === 'video' && isAuthenticated) {
+      if (mode === 'video') {
         if (window.aistudio && await window.aistudio.hasSelectedApiKey()) {
           setIsVeoKeyReady(true);
         } else {
@@ -112,9 +155,8 @@ const App: React.FC = () => {
       }
     };
     checkVeoKey();
-  }, [mode, isAuthenticated, setIsVeoKeyReady]);
+  }, [mode, setIsVeoKeyReady]);
   
-  // Warn user before leaving page if generation is in progress
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
         if (isLoading) {
@@ -126,11 +168,7 @@ const App: React.FC = () => {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [isLoading]);
 
-
-  // Load settings and creations on auth
   useEffect(() => {
-    if (!isAuthenticated) return;
-
     const loadData = async () => {
       try {
         const savedSettingsString = localStorage.getItem(SETTINGS_STORAGE_KEY);
@@ -145,16 +183,18 @@ const App: React.FC = () => {
         setSavedCreations(creations);
       } catch (err) {
         console.error("Failed to load creations", err);
-        setError("워크스페이스를 불러오는 데 실패했습니다.");
+        addToast("워크스페이스를 불러오는 데 실패했습니다.", "error");
       }
     };
     loadData();
-  }, [isAuthenticated, dispatchImageGenState]);
+  }, [dispatchImageGenState, addToast]);
+
   
   const handleSaveSettings = (newSettings: AppSettings) => {
     setAppSettings(newSettings);
     dispatchImageGenState({ type: 'RESET_TO_DEFAULTS', defaults: newSettings });
     localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(newSettings));
+    addToast("설정이 저장되었습니다.", "success");
   };
 
   const handleClearWorkspace = async () => {
@@ -162,24 +202,15 @@ const App: React.FC = () => {
         await clearAllCreations();
         setSavedCreations([]);
         setIsSettingsOpen(false);
+        addToast("워크스페이스가 비워졌습니다.", "success");
     } catch (err) {
         console.error("Failed to clear workspace", err);
-        setError("워크스페이스를 비우는 데 실패했습니다.");
+        addToast("워크스페이스를 비우는 데 실패했습니다.", "error");
     }
-  };
-
-  const handleLoginSuccess = (name: string) => {
-    sessionStorage.setItem('isAuthenticated', 'true');
-    localStorage.setItem('userName', name);
-    setIsAuthenticated(true);
-    setUserName(name);
   };
 
   const handleLogout = () => {
     sessionStorage.clear();
-    localStorage.removeItem('userName');
-    setIsAuthenticated(false);
-    setUserName('');
     setHasStarted(false);
     setSavedCreations([]);
   };
@@ -198,42 +229,51 @@ const App: React.FC = () => {
     }
   }, [mode, dispatchImageGenState, setVideoState]);
 
-  const handleSaveCreation = useCallback(async (data: string | Blob, type: 'image' | 'video') => {
+  const handleSaveCreation = useCallback(async (data: string | Blob, type: 'image' | 'video', silent = false) => {
       try {
         await addCreation(data, type);
         const updatedCreations = await getAllCreations();
         setSavedCreations(updatedCreations);
+        if (!silent) addToast("워크스페이스에 저장되었습니다!", "success");
       } catch (err) {
         console.error("Failed to save creation", err);
-        setError("워크스페이스에 저장하지 못했습니다.");
+        addToast("워크스페이스에 저장하지 못했습니다.", "error");
       }
-  }, []);
+  }, [addToast]);
+  
+  const handleSaveDecomposedElement = useCallback(async (element: DecomposedImageElement) => {
+    await handleSaveCreation(element.base64, 'image');
+  }, [handleSaveCreation]);
 
   const handleDeleteCreation = useCallback(async (idToDelete: number) => {
     try {
       await deleteCreation(idToDelete);
       setSavedCreations(prev => prev.filter(creation => creation.id !== idToDelete));
+      addToast("삭제되었습니다.", "success");
     } catch (err) {
       console.error("Failed to delete creation", err);
-      setError("워크스페이스에서 삭제하지 못했습니다.");
+      addToast("워크스페이스에서 삭제하지 못했습니다.", "error");
     }
-  }, []);
+  }, [addToast]);
 
-  const handleSelectForEditing = useCallback(async (base64DataUrl: string) => {
+  const handleSelectForEditing = useCallback(async (creation: WorkspaceCreation) => {
     try {
         setMode('image');
-        const file = await base64ToFile(base64DataUrl.split(',')[1], `editing-${Date.now()}.png`, 'image/png');
+        const file = await base64ToFile(creation.base64.split(',')[1], `editing-${Date.now()}.png`, 'image/png');
         setBaseImageFiles([file]);
         setIsBaseImageHighlighted(true);
         setReferenceImageFiles([]);
         dispatchImageGenState({ type: 'SET_FIELD', field: 'prompt', value: '' });
         setGeneratedImages([]);
         setError(null);
+        setEditingCreationId(creation.id);
+        setTimeout(() => setEditingCreationId(null), 1500);
         window.scrollTo({ top: 0, behavior: 'smooth' });
+        addToast('편집할 이미지를 불러왔습니다.', 'success');
     } catch (err) {
-        setError('편집할 이미지를 불러오지 못했습니다.');
+        addToast('편집할 이미지를 불러오지 못했습니다.', 'error');
     }
-  }, [setBaseImageFiles, setReferenceImageFiles, dispatchImageGenState, setGeneratedImages, setIsBaseImageHighlighted]);
+  }, [setBaseImageFiles, setReferenceImageFiles, dispatchImageGenState, setGeneratedImages, setIsBaseImageHighlighted, addToast]);
   
   const handleSelectVeoKey = async () => {
     try {
@@ -244,7 +284,7 @@ const App: React.FC = () => {
       }
     } catch (e) {
       console.error("API key selection failed", e);
-      setError("VEO API 키 선택에 실패했습니다.");
+      addToast("VEO API 키 선택에 실패했습니다.", "error");
     }
   };
 
@@ -253,15 +293,39 @@ const App: React.FC = () => {
     setError(null);
     setIsBaseImageHighlighted(false);
   };
+
+  const handleDecomposedElementClick = useCallback((element: DecomposedImageElement) => {
+    setLightboxContent({
+        id: 0, 
+        base64: `data:image/png;base64,${element.base64}`,
+        type: 'decomposed',
+        createdAt: new Date(),
+        downloadName: `${element.name.replace(/\s+/g, '_')}.png`,
+        saveData: element,
+    });
+  }, []);
   
+  const onImageClick = (content: LightboxContent) => {
+    const data = typeof content.saveData === 'string' ? content.saveData : content.base64.split(',')[1];
+    setLightboxContent({
+      id: content.id,
+      base64: `data:image/png;base64,${data}`,
+      type: 'image',
+      createdAt: content.createdAt,
+      downloadName: content.downloadName,
+      saveData: data,
+    });
+  };
+
   const ModeButton: React.FC<{ active: boolean, onClick: () => void, children: React.ReactNode}> = ({ active, onClick, children }) => (
-    <button onClick={onClick} disabled={isLoading} className={`w-full flex items-center justify-center gap-2 px-4 py-3 font-semibold transition-colors duration-300 rounded-t-lg ${active ? 'bg-gray-800/50 text-white border-b-2 border-purple-500' : 'bg-gray-900/50 text-gray-400 hover:bg-gray-800/30'}`}>
+    <button onClick={onClick} disabled={isLoading} className={`w-full flex items-center justify-center gap-1.5 sm:gap-2 px-1 sm:px-2 md:px-4 py-3 font-semibold transition-all duration-300 rounded-t-lg relative text-xs sm:text-sm ${active ? 'text-white' : 'text-gray-400 hover:text-white'}`}>
         {children}
+        {active && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-purple-500 to-teal-400"></div>}
     </button>
   );
 
   const SettingButton: React.FC<{ active: boolean, onClick: () => void, disabled?: boolean, children: React.ReactNode}> = ({ active, onClick, disabled, children }) => (
-     <button onClick={onClick} disabled={disabled} className={`flex-1 text-center px-3 py-2 text-sm font-semibold rounded-lg transition-colors duration-200 border-2 ${active ? 'bg-teal-500 border-teal-500 text-white' : 'bg-gray-700 border-gray-600 hover:bg-gray-600 hover:border-gray-500 text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed'}`}>
+     <button onClick={onClick} disabled={disabled} className={`flex-1 text-center px-3 py-2 text-sm font-semibold rounded-lg transition-all duration-200 border-2 ${active ? 'bg-teal-500 border-teal-500 text-white shadow-[0_0_10px_rgba(56,178,172,0.7)]' : 'bg-gray-700/50 border-gray-600 hover:border-purple-500 text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed'}`}>
         {children}
     </button>
   );
@@ -294,28 +358,95 @@ const App: React.FC = () => {
     </div>
   );
 
-  if (!isAuthenticated) return <LoginPage onLoginSuccess={handleLoginSuccess} />;
+  const imageGenerationButtonText = (() => {
+    if (baseImageFiles.length > 0 && referenceImageFiles.length > 0) {
+        return "이미지 결합 / 리메이크";
+    }
+    if (baseImageFiles.length > 0) {
+        return "이미지 수정 / 리메이크";
+    }
+    if (referenceImageFiles.length > 0) {
+        return "참고하여 아트 생성";
+    }
+    return "아트 생성";
+  })();
+
   if (!hasStarted) return <GettingStartedPage onStart={handleStart} />;
 
+  const rightPanelContent = () => {
+    switch(mode) {
+      case 'image':
+        return <ArtDisplay images={generatedImages} isLoading={isLoading} error={error} loadingMessage={loadingMessage} onSave={(image) => handleSaveCreation(image, 'image')} onImageClick={onImageClick}/>;
+      case 'composition':
+        return <CompositionDisplay 
+                    image={compositionState.composedImage} 
+                    isLoading={isLoading} 
+                    error={error} 
+                    loadingMessage={loadingMessage} 
+                    onSave={(image) => handleSaveCreation(image, 'image')} 
+                    onImageClick={onImageClick}
+                />;
+      case 'video':
+        return <VideoDisplay videoUrl={videoState.generatedVideoUrl} isLoading={isLoading} error={error} loadingMessage={loadingMessage}/>;
+      case 'decomposition':
+        return <ExtractionDisplay 
+                  originalImage={decompositionState.inputFile}
+                  decomposedElements={decompositionState.decomposedElements}
+                  isLoading={isLoading}
+                  error={error}
+                  loadingMessage={loadingMessage}
+                  onUseElement={handleUseDecomposedElement}
+                  onSaveElement={handleSaveDecomposedElement}
+                  onElementClick={handleDecomposedElementClick}
+               />;
+      default:
+        return null;
+    }
+  };
+
+
   return (
-    <div className="min-h-screen bg-gray-900 text-gray-100 flex flex-col">
-      <Header userName={userName} onSettingsClick={() => setIsSettingsOpen(true)} onLogout={handleLogout} />
+    <div className="min-h-screen flex flex-col">
+      <Header onSettingsClick={() => setIsSettingsOpen(true)} onLogout={handleLogout} />
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} onSave={handleSaveSettings} currentSettings={appSettings} onClearWorkspace={handleClearWorkspace} />
-      <Lightbox creation={lightboxContent} onClose={() => setLightboxContent(null)} />
+      <Lightbox 
+        content={lightboxContent} 
+        onClose={() => setLightboxContent(null)} 
+        onSave={(content) => {
+          if (content.type === 'decomposed' && content.saveData) {
+            handleSaveDecomposedElement(content.saveData);
+          } else if ((content.type === 'image' || content.type === 'video') && content.saveData) {
+              const rawBase64 = typeof content.saveData === 'string' ? content.saveData : content.base64.split(',')[1];
+              if (rawBase64) {
+                  handleSaveCreation(rawBase64, content.type);
+              }
+          }
+          setLightboxContent(null);
+        }}
+        onUse={handleUseFromLightbox}
+      />
       
+      <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
+        {toasts.map(toast => (
+          <Toast key={toast.id} message={toast.message} type={toast.type} onClose={() => setToasts(t => t.filter(t_ => t_.id !== toast.id))} />
+        ))}
+      </div>
+
       <main className="container mx-auto p-4 md:p-8 flex-grow w-full flex flex-col items-center gap-8">
         <div className="w-full text-center mb-4">
              <p className="mt-3 text-lg text-gray-400">시그니처 스타일을 가진 아티스트.</p>
         </div>
-        <div className="w-full max-w-4xl flex flex-col lg:flex-row gap-8">
+        <div className="w-full max-w-5xl flex flex-col lg:flex-row gap-8">
           {/* Left Panel: Controls */}
           <div className="w-full lg:w-1/2 flex flex-col">
-            <div className="grid grid-cols-2">
-                <ModeButton active={mode === 'image'} onClick={() => handleModeChange('image')}><PhotoIcon className="w-5 h-5" /><span>이미지 생성</span></ModeButton>
-                <ModeButton active={mode === 'video'} onClick={() => handleModeChange('video')}><VideoCameraIcon className="w-5 h-5" /><span>비디오 생성</span></ModeButton>
+            <div className="grid grid-cols-4 panel-glass rounded-t-2xl border-b-0">
+                <ModeButton active={mode === 'image'} onClick={() => handleModeChange('image')}><PhotoIcon className="w-5 h-5" /><span className="whitespace-nowrap">이미지 생성</span></ModeButton>
+                <ModeButton active={mode === 'composition'} onClick={() => handleModeChange('composition')}><CombineIcon className="w-5 h-5" /><span className="whitespace-nowrap">이미지 합성</span></ModeButton>
+                <ModeButton active={mode === 'decomposition'} onClick={() => handleModeChange('decomposition')}><ExtractIcon className="w-5 h-5" /><span className="whitespace-nowrap">이미지 분해</span></ModeButton>
+                <ModeButton active={mode === 'video'} onClick={() => handleModeChange('video')}><VideoCameraIcon className="w-5 h-5" /><span className="whitespace-nowrap">비디오 생성</span></ModeButton>
             </div>
             
-            <div className="flex flex-col gap-6 p-6 bg-gray-800/50 border border-t-0 border-gray-700 rounded-b-2xl shadow-lg flex-grow">
+            <div className="flex flex-col gap-6 p-6 panel-glass rounded-b-2xl shadow-lg flex-grow">
               {mode === 'image' && (
                 <>
                   <StyleSelector styles={artStyleOptions} selectedStyle={imageGenState.artStyle} onSelect={(value) => dispatchImageGenState({ type: 'SET_FIELD', field: 'artStyle', value })} disabled={isLoading}/>
@@ -326,10 +457,17 @@ const App: React.FC = () => {
                       <textarea id="prompt" value={imageGenState.prompt} onChange={(e) => dispatchImageGenState({ type: 'SET_FIELD', field: 'prompt', value: e.target.value })} placeholder={baseImageFiles.length > 0 ? "예: 캐릭터에게 왕관을 씌워주세요..." : "예: 폭풍우가 치는 바다 위의 노아의 방주..."} className="w-full h-36 p-3 bg-gray-900 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition" disabled={isLoading}/>
                       <div className="absolute bottom-3 right-3 flex items-center gap-2">
                         {imageGenState.originalPrompt && (<button onClick={() => dispatchImageGenState({ type: 'REVERT_PROMPT' })} disabled={isLoading} title="원래대로" className="text-gray-400 hover:text-purple-400 transition-colors disabled:opacity-50"><UndoIcon className="w-5 h-5" /></button>)}
-                        <button onClick={handleInspireMe} disabled={isLoading} title="영감 얻기" className="text-gray-400 hover:text-purple-400 transition-colors disabled:opacity-50"><SparklesIcon className="w-5 h-5" /></button>
+                        <button onClick={handleInspireMe} disabled={isLoading} title="영감 얻기" className="text-gray-400 hover:text-purple-400 transition-colors disabled:opacity-50"><LightbulbIcon className="w-5 h-5" /></button>
                       </div>
                     </div>
                   </div>
+
+                  {!imageGenState.prompt.trim() && baseImageFiles.length === 0 && referenceImageFiles.length === 0 && (
+                    <InspirationDisplay 
+                        onSelectPrompt={(prompt) => dispatchImageGenState({ type: 'SET_FIELD', field: 'prompt', value: prompt })} 
+                        disabled={isLoading} 
+                    />
+                  )}
                   
                   <div>
                     <label htmlFor="negative-prompt" className="block text-lg font-semibold mb-2 text-teal-300">제외할 내용 <span className="text-sm text-gray-400 font-normal">(선택 사항)</span></label>
@@ -358,25 +496,92 @@ const App: React.FC = () => {
                             <div className="sm:col-span-3"><label className="block text-sm font-medium text-gray-300 mb-1">이미지 규격</label><div className="flex gap-2">{imageAspectRatioOptions.map(option => (<SettingButton key={option.id} onClick={() => dispatchImageGenState({ type: 'SET_FIELD', field: 'imageAspectRatio', value: option.id })} disabled={isLoading} active={imageGenState.imageAspectRatio === option.id}><div className="flex flex-col items-center justify-center leading-tight"><span>{option.label.split('\n')[0]}</span>{option.label.split('\n')[1] && <span className="text-xs">{option.label.split('\n')[1]}</span>}</div></SettingButton>))}</div></div>
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-start">
-                            <div><label htmlFor="num-outputs" className="block text-sm font-medium text-gray-300 mb-1">생성 개수</label><select id="num-outputs" value={imageGenState.numOutputs} onChange={(e) => dispatchImageGenState({ type: 'SET_FIELD', field: 'numOutputs', value: Number(e.target.value)})} disabled={isLoading} className="bg-gray-700 border border-gray-600 rounded-md px-2 py-1 text-sm focus:ring-1 focus:ring-purple-500 disabled:opacity-50"><option value={1}>1</option><option value={2}>2</option><option value={3}>3</option><option value={4}>4</option></select></div>
+                            <div><label htmlFor="num-outputs" className="block text-sm font-medium text-gray-300 mb-1">생성 개수</label><select id="num-outputs" value={imageGenState.numOutputs} onChange={(e) => dispatchImageGenState({ type: 'SET_FIELD', field: 'numOutputs', value: Number(e.target.value)})} disabled={isLoading} className="bg-gray-700/50 border border-gray-600 rounded-md px-2 py-1 text-sm focus:ring-1 focus:ring-purple-500 disabled:opacity-50"><option value={1}>1</option><option value={2}>2</option><option value={3}>3</option><option value={4}>4</option></select></div>
                             <div>
                                 <label className="block text-sm font-medium text-gray-300 mb-1">프롬프트 확장</label>
                                 <label className={`relative inline-flex items-center ${isLoading || !imageGenState.prompt.trim() ? 'cursor-not-allowed' : 'cursor-pointer'}`} title={!imageGenState.prompt.trim() ? "프롬프트를 입력해야 확장을 사용할 수 있습니다." : "AI가 프롬프트를 더 창의적으로 개선합니다."}><input type="checkbox" checked={imageGenState.isPromptExpansionEnabled} onChange={() => dispatchImageGenState({ type: 'SET_FIELD', field: 'isPromptExpansionEnabled', value: !imageGenState.isPromptExpansionEnabled })} className="sr-only peer" disabled={isLoading || !imageGenState.prompt.trim()}/><div className="w-11 h-6 bg-gray-600 rounded-full peer peer-focus:ring-2 peer-focus:ring-purple-500 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-teal-500 peer-disabled:opacity-50"></div></label>
-                                <p className="text-xs text-gray-500 mt-1">AI가 프롬프트를 창의적으로 개선합니다.</p>
                             </div>
                         </div>
                     </div>
                   </div>
                   
-                  {imageGenState.isPromptExpansionEnabled ? (<button onClick={handlePromptExpansion} disabled={isLoading || !imageGenState.prompt.trim()} className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-green-600 to-emerald-500 text-white font-bold py-4 px-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed hover:from-green-700 hover:to-emerald-600"><SparklesIcon className="w-6 h-6" /><span>프롬프트 제안받기</span></button>) : (<button onClick={handleImageGenerate} disabled={isImageGenerateDisabled} className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-purple-600 to-teal-500 text-white font-bold py-4 px-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed hover:from-purple-700 hover:to-teal-600"><SparklesIcon className="w-6 h-6" /><span>{isImageGenerateDisabled && (baseImageFiles.length > 0 || referenceImageFiles.length > 0) ? "비전을 입력하세요" : "아트 생성"}</span></button>)}
-                  {imageGenState.originalPrompt && (<button onClick={handleImageGenerate} disabled={isLoading} className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-purple-600 to-teal-500 text-white font-bold py-4 px-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed hover:from-purple-700 hover:to-teal-600"><SparklesIcon className="w-6 h-6" /><span>제안된 프롬프트로 아트 생성</span></button>)}
+                  <button onClick={handleImageGenerate} disabled={isImageGenerateDisabled} className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-purple-600 to-teal-500 text-white font-bold py-4 px-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed hover:from-purple-700 hover:to-teal-600 shadow-lg hover:shadow-purple-500/50">
+                    <SparklesIcon className="w-6 h-6" />
+                    <span>{imageGenerationButtonText}</span>
+                  </button>
+                  {imageGenState.originalPrompt && (<p className="text-xs text-center text-gray-400">프롬프트가 확장되었습니다. <button onClick={() => dispatchImageGenState({ type: 'REVERT_PROMPT' })} className="underline hover:text-purple-400">되돌리기</button></p>)}
+                </>
+              )}
+              {mode === 'composition' && (
+                <>
+                  <div>
+                    <div className="flex justify-between items-center mb-2">
+                        <LabeledSection title="이미지 합성하기" tooltip="합성할 여러 이미지를 업로드하세요 (최대 12개). AI가 각 이미지의 원본 형태를 그대로 유지하면서 하나의 자연스러운 장면으로 조합합니다." />
+                        {compositionState.inputFiles.length > 0 && (
+                            <button 
+                              onClick={() => setCompositionInputFiles([])} 
+                              disabled={isLoading}
+                              className="flex items-center gap-1.5 text-sm font-medium text-red-400 hover:text-red-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            >
+                              <TrashIcon className="w-4 h-4" />
+                              <span>전체 삭제</span>
+                            </button>
+                        )}
+                    </div>
+                    <ImageInput 
+                      files={compositionState.inputFiles} 
+                      onFilesChange={setCompositionInputFiles} 
+                      isLoading={isLoading} 
+                      maxFiles={12}
+                    />
+                  </div>
+                  <button 
+                    onClick={handleCompose} 
+                    disabled={isLoading || isCompositionDisabled}
+                    className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-purple-600 to-indigo-500 text-white font-bold py-4 px-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed hover:from-purple-700 hover:to-indigo-600 shadow-lg hover:shadow-purple-500/50"
+                  >
+                    <CombineIcon className="w-6 h-6" />
+                    <span>이미지 합성 실행</span>
+                  </button>
+                  {(compositionState.inputFiles.length > 0 && compositionState.inputFiles.length < 2) && (
+                      <p className="text-xs text-center text-yellow-400">합성을 위해 2개 이상의 이미지를 업로드해주세요.</p>
+                  )}
+                </>
+              )}
+              {mode === 'decomposition' && (
+                <>
+                  <div>
+                    <div className="mb-2">
+                      <LabeledSection title="이미지 분해하기" tooltip="분해할 이미지를 업로드하세요. AI가 이미지의 핵심 요소를 분리하고, 가려진 부분을 복원합니다." />
+                    </div>
+                    <ImageInput 
+                      files={decompositionState.inputFile ? [decompositionState.inputFile] : []} 
+                      onFilesChange={(files) => setDecompositionInputFile(files[0] || null)} 
+                      isLoading={isLoading} 
+                      maxFiles={1}
+                      replace
+                    />
+                  </div>
+                  <button 
+                    onClick={handleDecompose} 
+                    disabled={isDecompositionDisabled}
+                    className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-purple-600 to-indigo-500 text-white font-bold py-4 px-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed hover:from-purple-700 hover:to-indigo-600 shadow-lg hover:shadow-purple-500/50"
+                  >
+                    <ExtractIcon className="w-6 h-6" />
+                    <span>이미지 분해 실행</span>
+                  </button>
                 </>
               )}
               {mode === 'video' && (
                 <>
                     {!isVeoKeyReady && <VeoApiKeyBanner />}
-                    <div><label htmlFor="video-prompt" className="block text-lg font-semibold mb-2 text-teal-300">비디오 시나리오</label><div className="relative"><textarea id="video-prompt" value={videoState.prompt} onChange={(e) => setVideoState(p=>({...p, prompt: e.target.value}))} placeholder="예: 캐릭터가 배경 숲을 탐험합니다..." className="w-full h-36 p-3 bg-gray-900 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition" disabled={isLoading}/><button onClick={handleInspireMe} disabled={isLoading} title="영감 얻기" className="absolute bottom-3 right-3 text-gray-400 hover:text-purple-400 transition-colors disabled:opacity-50"><SparklesIcon className="w-5 h-5" /></button></div></div>
-                    <div className="space-y-4 p-4 bg-gray-900/50 rounded-lg border border-gray-700"><h3 className="text-lg font-semibold text-teal-300 -mb-2">비디오 에셋</h3><p className="text-sm text-gray-400">비디오에 포함될 이미지를 업로드하세요. 모든 이미지는 선택 사항입니다.</p><div><label className="block font-medium mb-1 text-gray-300">배경 이미지 <span className="text-sm text-gray-400 font-normal">(최대 3개)</span></label><ImageInput files={videoState.backgroundImageFile} onFilesChange={files => setVideoState(p=>({...p, backgroundImageFile: files}))} isLoading={isLoading} maxFiles={3}/></div><div><label className="block font-medium mb-1 text-gray-300">캐릭터 이미지 <span className="text-sm text-gray-400 font-normal">(최대 10개)</span></label><ImageInput files={videoState.characterImageFile} onFilesChange={files => setVideoState(p=>({...p, characterImageFile: files}))} isLoading={isLoading} maxFiles={10}/></div><div><label className="block font-medium mb-1 text-gray-300">기타 이미지 <span className="text-sm text-gray-400 font-normal">(최대 5개, 예: 소품)</span></label><ImageInput files={videoState.otherImageFile} onFilesChange={files => setVideoState(p=>({...p, otherImageFile: files}))} isLoading={isLoading} maxFiles={5}/><input type="text" value={videoState.otherImageComment} onChange={(e) => setVideoState(p=>({...p, otherImageComment: e.target.value}))} placeholder="이 이미지는 '마법 검'입니다 (선택 사항)" className="w-full mt-2 p-2 bg-gray-900 border border-gray-600 rounded-lg focus:ring-1 focus:ring-purple-500 transition" disabled={isLoading}/></div></div>
+                    <div><label htmlFor="video-prompt" className="block text-lg font-semibold mb-2 text-teal-300">비디오 시나리오</label><div className="relative"><textarea id="video-prompt" value={videoState.prompt} onChange={(e) => setVideoState(p=>({...p, prompt: e.target.value}))} placeholder="예: 캐릭터가 배경 숲을 탐험합니다..." className="w-full h-36 p-3 bg-gray-900 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition" disabled={isLoading}/><button onClick={handleInspireMe} disabled={isLoading} title="영감 얻기" className="absolute bottom-3 right-3 text-gray-400 hover:text-purple-400 transition-colors disabled:opacity-50"><LightbulbIcon className="w-5 h-5" /></button></div></div>
+                    <div>
+                        <div className="mb-2">
+                          <LabeledSection title="참고 이미지" tooltip="비디오 생성에 사용할 이미지를 업로드하세요. (최대 3개)" />
+                        </div>
+                        <ImageInput files={videoState.referenceImageFiles} onFilesChange={files => setVideoState(p=>({...p, referenceImageFiles: files}))} isLoading={isLoading} maxFiles={3}/>
+                    </div>
                     <div className="space-y-2">
                         <label className="block text-lg font-semibold text-teal-300">비디오 설정</label>
                         {videoState.isMultiImageMode && (<p className="text-sm text-yellow-400 mb-2 bg-yellow-900/50 p-3 rounded-md border border-yellow-700">다중 이미지 모드에서는 <strong>16:9 비율</strong>과 <strong>720p 해상도</strong>로 고정됩니다.</p>)}
@@ -385,21 +590,17 @@ const App: React.FC = () => {
                             <div><span className="text-sm font-medium text-gray-300">해상도</span><div className="flex gap-2 mt-1"><SettingButton onClick={() => setVideoState(p=>({...p, resolution: '1080p'}))} disabled={isLoading || videoState.isMultiImageMode} active={videoState.resolution === '1080p'}><div className="flex flex-col items-center justify-center leading-tight"><span>1080p</span><span className="text-xs">(고화질)</span></div></SettingButton><SettingButton onClick={() => setVideoState(p=>({...p, resolution: '720p'}))} disabled={isLoading || videoState.isMultiImageMode} active={videoState.resolution === '720p'}><div className="flex flex-col items-center justify-center leading-tight"><span>720p</span><span className="text-xs">(표준)</span></div></SettingButton></div></div>
                         </div>
                     </div>
-                    <button onClick={handleVideoGenerate} disabled={isVideoGenerateDisabled} className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-teal-600 to-cyan-500 text-white font-bold py-4 px-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed hover:from-teal-700 hover:to-cyan-600"><VideoCameraIcon className="w-6 h-6" /><span>비디오 생성</span></button>
+                    <button onClick={handleVideoGenerate} disabled={isVideoGenerateDisabled} className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-teal-600 to-cyan-500 text-white font-bold py-4 px-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed hover:from-teal-700 hover:to-cyan-600 shadow-lg hover:shadow-cyan-500/50"><VideoCameraIcon className="w-6 h-6" /><span>비디오 생성</span></button>
                 </>
               )}
             </div>
           </div>
 
           {/* Right Panel: Display */}
-          {mode === 'image' ? (
-            <ArtDisplay images={generatedImages} isLoading={isLoading} error={error} loadingMessage={loadingMessage} onSave={(image) => handleSaveCreation(image, 'image')} onImageClick={(image) => setLightboxContent({ id: 0, base64: `data:image/png;base64,${image}`, type: 'image', createdAt: new Date() })}/>
-          ) : (
-            <VideoDisplay videoUrl={videoState.generatedVideoUrl} isLoading={isLoading} error={error} loadingMessage={loadingMessage}/>
-          )}
+          {rightPanelContent()}
         </div>
 
-        <Workspace userName={userName} creations={savedCreations} onSelectForEditing={handleSelectForEditing} onDelete={handleDeleteCreation} onCreationClick={setLightboxContent}/>
+        <Workspace creations={savedCreations} onSelectForEditing={handleSelectForEditing} onDelete={handleDeleteCreation} onCreationClick={(creation) => setLightboxContent({ ...creation, type: creation.type, downloadName: `creation-${creation.id}.${creation.type === 'video' ? 'mp4' : 'png'}`})} editingCreationId={editingCreationId} />
       </main>
     </div>
   );

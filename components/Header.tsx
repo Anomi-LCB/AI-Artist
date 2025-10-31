@@ -1,15 +1,15 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { SettingsIcon } from './icons/SettingsIcon';
 import { UserIcon } from './icons/UserIcon';
 import { LogoutIcon } from './icons/LogoutIcon';
 
 interface HeaderProps {
-    userName: string;
     onSettingsClick: () => void;
     onLogout: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ userName, onSettingsClick, onLogout }) => {
+export const Header: React.FC<HeaderProps> = ({ onSettingsClick, onLogout }) => {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -32,7 +32,7 @@ export const Header: React.FC<HeaderProps> = ({ userName, onSettingsClick, onLog
   };
 
   return (
-    <header className="sticky top-0 z-10 w-full bg-gray-900/80 backdrop-blur-md border-b border-purple-900/50">
+    <header className="sticky top-0 z-20 w-full bg-[var(--bg-primary)]/80 backdrop-blur-md border-b border-[var(--border-color)]">
       <div className="container mx-auto px-4 md:px-8 flex items-center justify-between h-16">
         {/* Left side: Title */}
         <div className="flex items-center gap-4">
@@ -52,24 +52,19 @@ export const Header: React.FC<HeaderProps> = ({ userName, onSettingsClick, onLog
               aria-expanded={isDropdownOpen}
             >
               <UserIcon className="w-6 h-6" />
-              <span className="hidden md:inline font-medium">{userName}</span>
             </button>
             {isDropdownOpen && (
-              <div className="absolute right-0 mt-2 w-56 bg-gray-800 rounded-md shadow-lg py-1 border border-gray-700 animate-fade-in-fast">
-                <div className="px-4 py-2 border-b border-gray-700">
-                  <p className="text-sm text-gray-400">로그인 계정</p>
-                  <p className="font-semibold text-white truncate">{userName}</p>
-                </div>
+              <div className="absolute right-0 mt-2 w-56 panel-glass rounded-md shadow-lg py-1 animate-fade-in-fast">
                 <button
                   onClick={handleSettingsClick}
-                  className="flex items-center gap-3 w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-700/50 transition-colors"
+                  className="flex items-center gap-3 w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-white/10 transition-colors"
                 >
                   <SettingsIcon className="w-5 h-5" />
                   <span>설정</span>
                 </button>
                 <button
                   onClick={onLogout}
-                  className="flex items-center gap-3 w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-red-900/50 transition-colors"
+                  className="flex items-center gap-3 w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-red-500/20 transition-colors"
                 >
                   <LogoutIcon className="w-5 h-5" />
                   <span>로그아웃</span>

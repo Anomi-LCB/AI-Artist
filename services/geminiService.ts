@@ -1,7 +1,7 @@
 
 
-import { GoogleGenAI, Modality, GenerateContentResponse, Part, AspectRatio, Resolution } from "@google/genai";
-import { ArtStyleId, QualityId, ImageAspectRatio } from "../types";
+import { GoogleGenAI, Modality, GenerateContentResponse, Part, Type, VideoGenerationReferenceImage, VideoGenerationReferenceType } from "@google/genai";
+import { ArtStyleId, QualityId, ImageAspectRatio, AspectRatio, Resolution, DecomposedImageElement } from "../types";
 
 const ARTIST_STYLE_PROMPT = `
 You are an AI artist with a very specific, consistent, and recognizable signature art style.
@@ -70,338 +70,421 @@ const QUALITY_PROMPTS: { [key in QualityId]: string } = {
   'High': 'Create the image with intricate details, ultra-high resolution, and masterpiece quality. Pay close attention to textures, lighting, and subtle nuances to make it look stunning and professional.',
 };
 
+const DECOMPOSITION_ANALYSIS_PROMPT = `You are an expert image analyst. Your task is to identify all the distinct, primary objects or characters in the provided image.
+- List the names of these objects in a JSON array of strings.
+- Be concise and specific with the names (e.g., "Acoustic Guitar", "Grand Piano", "Red Drum Kit").
+- The names should be in Korean.
+- Do not list insignificant background elements.
+- If it's a single character, list their main body parts (e.g., "Head", "Torso", "Arms", "Legs").
+Example output for an image with a cat and a dog: ["고양이", "개"]
+Example output for an image of a single person: ["머리", "상체", "팔", "다리"]
+`;
+
+const DECOMPOSITION_EXTRACTION_PROMPT_TEMPLATE = (objectName: string) => `
+You are an expert digital restoration artist, equivalent to a world-class Photoshop professional. Your mission is to perform a flawless extraction and reconstruction of a single object from an image.
+
+**Your ONLY target for this operation is: "${objectName}"**
+
+**Execution Protocol:**
+1.  **Flawless Isolation:** Your output MUST contain ONLY the specified "${objectName}". All other elements must be completely removed.
+2.  **Background:** The isolated object must be placed on a perfectly transparent background.
+3.  **Masterful Reconstruction (Top Priority):** You must meticulously reconstruct any and all parts of the "${objectName}" that are occluded, obscured, or cut off. This reconstruction must be undetectable. The restored areas must achieve a 99.99% fidelity match to the original's visible style, texture, lighting, and perspective. The final object must appear 100% complete and natural, as if it was photographed without any obstruction.
+4.  **Format:** Your final output is a single image file of the perfectly restored "${objectName}".
+`;
+
+const COMPOSITION_PROMPT = `You are an elite-level visual effects (VFX) compositor, a master of digital illusion with unparalleled skill in photorealistic integration. Your mission is to composite multiple objects from separate source images into a single, flawlessly coherent, and utterly believable scene, regardless of whether you are given two images or up to twelve. You must intelligently adapt to the number of inputs to create the best possible composition.
+
+**Your #1 PRIME DIRECTIVE, which supersedes all other considerations, is ABSOLUTE SOURCE FIDELITY.**
+
+**Core Mandates (Non-Negotiable):**
+
+1.  **ZERO ALTERATION OF SOURCE OBJECTS:** This is the most critical rule. The objects from the input images must be treated as immutable assets.
+    *   You MUST extract them perfectly, as if using a pixel-perfect alpha mask.
+    *   You MUST NOT redraw, repaint, restyle, re-texture, or in any way change the visual characteristics of the source objects. Their original pixels, colors, textures, and internal lighting are sacred.
+    *   If a person is wearing a specific red shirt in an input image, they MUST be wearing that exact same red shirt in the final output. No substitutions, no stylistic interpretations.
+
+2.  **INTELLIGENT & CONTEXT-AWARE SCENE CONSTRUCTION:**
+    *   **Deep Analysis:** Your first step is to perform a deep analysis of all provided objects. Understand not just *what* they are, but their potential relationships, relative scales, and implied actions.
+    *   **Dynamic Composition Strategy:** The number of input images will vary. Your strategy must adapt. For a few objects, the interaction might be direct and intimate. For many objects, you may need to create a wider scene, arranging them as a group or in a plausible environment where their co-existence makes sense.
+    *   **Optimal Arrangement:** Do not settle for the first logical arrangement. Your goal is to find the **most compelling, natural, and aesthetically pleasing** composition. The final scene should tell a clear and engaging story. For example:
+        *   **Inputs:** [Image of a person], [Image of a dog], [Image of a car].
+        *   **Optimal Output:** A dynamic shot of the person driving the car with the dog looking excitedly out the passenger window is often more compelling than a static shot of them standing beside the car. Choose the arrangement that maximizes visual interest and narrative clarity.
+        *   **Inputs:** [Image of a woman], [Image of a business suit], [Image of a laptop], [Image of a modern office chair].
+        *   **Optimal Output:** The woman, professionally dressed in the suit, actively engaged with her work on the laptop while seated in the chair, creating a complete narrative of a modern professional at work.
+    *   Your creative judgment is key, but it must be guided by the principles of logic, realism, and strong visual storytelling.
+
+3.  **MASTERFUL ENVIRONMENTAL INTEGRATION:**
+    *   While the source objects themselves are immutable, you MUST create a new, unifying environment for them.
+    *   **Lighting & Shadows:** All objects must be re-lit to match a single, consistent light source within the new scene. This is crucial for realism. You must generate physically accurate shadows (cast shadows, contact shadows) for every object based on this new light source.
+    *   **Perspective & Scale:** Ensure all objects are scaled correctly relative to each other and are placed on a consistent ground plane or environment. Their perspectives must align.
+    *   **Atmosphere & Color Grading:** Create a background and atmosphere (indoor, outdoor, day, night) that complements the objects. Apply a final color grade to the entire image to unify all elements and create a cinematic, photorealistic look.
+
+4.  **OUTPUT REQUIREMENTS:**
+    *   The final output must be a single, high-resolution, photorealistic image.
+    *   The result should be so seamless that it's impossible to tell it was composited from multiple sources.
+
+**Summary of your task:** Act as a world-class compositor. Take these exact objects. Do not change them. Intelligently analyze their relationships and the number of inputs to construct the most plausible and visually stunning scene possible. The realism of the integration is paramount.
+`;
+
+
 const getFriendlyBlockReason = (reason: string | undefined): string => {
     switch (reason) {
         case 'SAFETY':
             return '안전 설정에 의해 생성이 차단되었습니다. 더 안전한 프롬프트를 사용해 보세요.';
         case 'OTHER':
-            return '알 수 없는 이유로 생성이 차단되었습니다. 프롬프트를 약간 수정하여 다시 시도해 보세요.';
+            return '알 수 없는 이유로 생성이 차단되었습니다. 프롬프트를 수정해 보세요.';
         default:
-            return `생성이 차단되었습니다 (이유: ${reason}).`;
+            return `생성이 차단되었습니다. 이유: ${reason || '알 수 없음'}`;
     }
+};
+
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+
+// Helper to handle response and errors for image generation
+const handleGenerateContentResponse = async (responsePromise: Promise<GenerateContentResponse>): Promise<string[]> => {
+    const response = await responsePromise;
+
+    if (response.candidates && response.candidates.length > 0) {
+        const images: string[] = [];
+        for (const candidate of response.candidates) {
+            if (candidate.finishReason && candidate.finishReason !== 'STOP') {
+                throw new Error(getFriendlyBlockReason(candidate.finishReason));
+            }
+            if (candidate.content && candidate.content.parts) {
+                for (const part of candidate.content.parts) {
+                    if (part.inlineData) {
+                        images.push(part.inlineData.data);
+                    }
+                }
+            }
+        }
+        if (images.length > 0) {
+            return images;
+        }
+    }
+    
+    if (response.promptFeedback?.blockReason) {
+        throw new Error(getFriendlyBlockReason(response.promptFeedback.blockReason));
+    }
+
+    throw new Error('API에서 이미지를 반환하지 않았습니다. 프롬프트를 수정하거나 다시 시도해 주세요.');
 };
 
 export const expandPrompt = async (
-    userPrompt: string,
-    onStatusUpdate: (message: string) => void
+  prompt: string,
+  setLoadingMessage: (message: string) => void
 ): Promise<string> => {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
-    onStatusUpdate("프롬프트를 확장하는 중...");
-    try {
-        const expansionPrompt = `You are a creative assistant and an expert prompt engineer for an advanced AI image generation model. Your task is to take a user's core idea and expand it into a much more vivid, artistic, and detailed prompt.
-- **Goal:** Enhance the original concept with rich sensory details, dynamic action, emotional depth, and a compelling atmosphere.
-- **Process:** Maintain the key subject of the original prompt but build a world around it. Describe the lighting, the environment, the mood, and the specific details that will make the image come alive.
-- **Output:** The final result should be a well-written, descriptive paragraph that the image generation model can easily understand and interpret to create a beautiful piece of art. It should be written in a single block of text.
+  setLoadingMessage('프롬프트를 확장하고 있습니다...');
+  try {
+    const model = 'gemini-2.5-flash';
+    const fullPrompt = `You are a creative assistant. Expand the following user prompt into a more detailed and imaginative one for an AI image generator. The expanded prompt should be in Korean.
+User prompt: "${prompt}"
+Expanded prompt:`;
 
-# Original User Prompt:
-"${userPrompt}"`;
-        const expansionResponse = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: expansionPrompt,
-        });
-        
-        const expandedText = expansionResponse.text;
-        if (expandedText && expandedText.trim()) {
-            return expandedText.trim();
-        }
-        throw new Error("Expanded prompt was empty.");
-    } catch (expansionError) {
-        console.warn("Prompt expansion failed:", expansionError);
-        onStatusUpdate("프롬프트 확장에 실패했습니다.");
-        throw expansionError;
+    const response = await ai.models.generateContent({
+      model: model,
+      contents: fullPrompt,
+    });
+    
+    const expandedPrompt = response.text.trim();
+    if (!expandedPrompt) {
+        throw new Error("Failed to expand prompt.");
     }
+    return expandedPrompt;
+  } catch (error: any) {
+    console.error("Error expanding prompt:", error);
+    return prompt;
+  }
 };
 
 export const generateArt = async (
-  userPrompt: string,
+  prompt: string,
   baseImages: { mimeType: string; data: string }[],
   referenceImages: { mimeType: string; data: string }[],
-  onStatusUpdate: (message: string) => void,
+  setLoadingMessage: (message: string) => void,
   artStyle: ArtStyleId,
   numOutputs: number,
   quality: QualityId,
   negativePrompt: string,
   imageAspectRatio: ImageAspectRatio,
 ): Promise<string[]> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
-  
-  try {
-    const useImagenModel = baseImages.length === 0;
+    setLoadingMessage('아티스트가 붓을 들었습니다...');
 
-    onStatusUpdate(numOutputs > 1 ? `${numOutputs}개의 이미지를 생성하는 중...` : '이미지 생성 중...');
+    const systemInstruction = ARTIST_STYLE_PROMPT + STYLE_PROMPTS[artStyle] + QUALITY_PROMPTS[quality];
 
-    if (useImagenModel) {
-        // --- LOGIC FOR IMAGEN MODEL (text or reference images -> new image) ---
-        let finalPromptText: string;
-        const qualityInstruction = QUALITY_PROMPTS[quality] || '';
-        let referenceImageDescription = '';
+    let fullPrompt = prompt;
+    if (negativePrompt) {
+        fullPrompt += `\n\n[Negative Prompt]: ${negativePrompt}`;
+    }
 
-        if (referenceImages.length > 0) {
-            onStatusUpdate("참고 이미지를 분석하는 중...");
-            const analysisPromptText = `You are an expert art analyst. Analyze the provided image(s) with depth and nuance. Deconstruct them recursively to capture their core essence.
-1. **Emotional Core & Narrative:** What is the central emotion or story being conveyed? Analyze character expressions, body language, and their interaction with the environment to understand the narrative. What is the main theme?
-2. **Atmosphere & Mood:** Describe the overall atmosphere (e.g., melancholic, joyful, tense, serene). How is this mood created?
-3. **Color & Light Analysis:** Analyze the color palette. What are the dominant colors, and what psychological effects do they have? How does the use of light (e.g., soft, harsh, dramatic lighting) contribute to the mood and focus?
-4. **Composition & Dynamics:** Analyze the composition in detail. Where is the focal point? How do lines, shapes, and balance guide the viewer's eye and contribute to the image's energy?
-5. **Synthesis:** Combine all the above analyses into a comprehensive description of the image. This description should go beyond just 'what is in the image' to capture 'what it is about' on an emotional and thematic level. This analysis will be used by another artist to recreate not just the form, but the soul of the image.`;
+    const parts: Part[] = [];
 
-            const analysisResponse = await ai.models.generateContent({
-                model: 'gemini-2.5-flash',
-                contents: { parts: [
-                    ...referenceImages.map(image => ({ inlineData: image })),
-                    { text: analysisPromptText }
-                ]},
+    baseImages.forEach(img => {
+        parts.push({
+            inlineData: {
+                mimeType: img.mimeType,
+                data: img.data,
+            },
+        });
+    });
+
+    referenceImages.forEach(img => {
+        parts.push({
+            inlineData: {
+                mimeType: img.mimeType,
+                data: img.data,
+            },
+        });
+    });
+
+    parts.push({ text: fullPrompt });
+
+    try {
+        setLoadingMessage('영감을 불어넣고 있습니다...');
+        
+        const responsePromise = ai.models.generateContent({
+            model: 'gemini-2.5-flash-image',
+            contents: { parts },
+            config: {
+                systemInstruction,
+                responseModalities: [Modality.IMAGE],
+                // The API does not have `numberOfImages` for this model, but we request multiple images via the UI.
+                // We will rely on the model to potentially return multiple images if the feature is supported implicitly. The UI handles multiple results.
+            },
+        });
+        
+        setLoadingMessage('마무리 터치 중...');
+
+        return await handleGenerateContentResponse(responsePromise);
+    } catch (error: any) {
+        console.error("Error generating art:", error);
+        throw new Error(error.message || '이미지 생성 중 오류가 발생했습니다.');
+    }
+};
+
+export const decomposeImage = async (
+    baseImage: { mimeType: string; data: string },
+    setLoadingMessage: (message: string) => void
+): Promise<DecomposedImageElement[]> => {
+    // 1. Analysis Step
+    setLoadingMessage('객체 식별 중...');
+    let objectNames: string[] = [];
+    try {
+        const analysisResponse = await ai.models.generateContent({
+            model: 'gemini-2.5-pro',
+            contents: {
+                parts: [
+                    { inlineData: { mimeType: baseImage.mimeType, data: baseImage.data } },
+                    { text: "Identify the objects in this image as per the system instructions." }
+                ]
+            },
+            config: {
+                systemInstruction: DECOMPOSITION_ANALYSIS_PROMPT,
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING }
+                }
+            }
+        });
+
+        const jsonText = analysisResponse.text.trim();
+        objectNames = JSON.parse(jsonText);
+        
+        if (!Array.isArray(objectNames) || objectNames.length === 0) {
+            throw new Error("이미지에서 분해할 객체를 식별하지 못했습니다.");
+        }
+    } catch (error: any) {
+        console.error("Error identifying objects for decomposition:", error);
+        throw new Error("객체 식별 단계에서 오류가 발생했습니다. 이미지가 너무 복잡하거나 지원되지 않는 형식일 수 있습니다.");
+    }
+    
+    // 2. Extraction Step
+    const decomposedElements: DecomposedImageElement[] = [];
+    for (let i = 0; i < objectNames.length; i++) {
+        const name = objectNames[i];
+        setLoadingMessage(`${i + 1}/${objectNames.length}: '${name}' 분해 중...`);
+
+        try {
+            const extractionPrompt = DECOMPOSITION_EXTRACTION_PROMPT_TEMPLATE(name);
+            const parts: Part[] = [
+                { inlineData: { mimeType: baseImage.mimeType, data: baseImage.data } },
+                { text: `Isolate the "${name}" from this image.` }
+            ];
+
+            const responsePromise = ai.models.generateContent({
+                model: 'gemini-2.5-flash-image',
+                contents: { parts },
+                config: {
+                    systemInstruction: extractionPrompt,
+                    responseModalities: [Modality.IMAGE],
+                },
             });
             
-            referenceImageDescription = analysisResponse.text;
-
-            if (!referenceImageDescription) {
-                throw new Error("참고 이미지를 분석하지 못했습니다.");
-            }
-            onStatusUpdate("분석을 기반으로 그림을 그리는 중...");
-            finalPromptText = `${ARTIST_STYLE_PROMPT}\n${STYLE_PROMPTS[artStyle] || ''}\n\n**Based on the following analysis of a reference image, create a new illustration in your signature style:**\n"${referenceImageDescription}"\n\n**Incorporate the user's specific instructions:** "${userPrompt || 'Create an image based on the analysis.'}"\n\n**Quality Instructions:** ${qualityInstruction}`;
-        } else {
-            // Text prompt only
-            onStatusUpdate("프롬프트를 기반으로 그림을 그리는 중...");
-            finalPromptText = `${ARTIST_STYLE_PROMPT}\n${STYLE_PROMPTS[artStyle] || ''}\n\n**User's Request:** "${userPrompt}"\n\n**Quality Instructions:** ${qualityInstruction}`;
-        }
-        
-        if (negativePrompt && negativePrompt.trim()) {
-            finalPromptText += `\n\n**Negative Prompt (Crucial Exclusion):** Under no circumstances should the final image contain any of the following elements or concepts: "${negativePrompt.trim()}". The artist must strictly avoid these.`;
-        }
-
-        const generationPromises = [];
-        for (let i = 0; i < numOutputs; i++) {
-            generationPromises.push(
-                ai.models.generateImages({
-                    model: 'imagen-4.0-generate-001',
-                    prompt: finalPromptText,
-                    config: {
-                        numberOfImages: 1,
-                        outputMimeType: 'image/png',
-                        aspectRatio: imageAspectRatio,
-                    },
-                })
-            );
-        }
-
-        const responses = await Promise.all(generationPromises);
-        const allResults: string[] = [];
-
-        responses.forEach(response => {
-            if (!response.generatedImages || response.generatedImages.length === 0) {
-                console.warn("Imagen API did not return any images for a request.");
-                return;
-            }
-            const base64Image = response.generatedImages[0].image.imageBytes;
-            if (base64Image) {
-                allResults.push(base64Image);
-            }
-        });
-
-        if (allResults.length === 0) {
-            throw new Error("Imagen API에서 유효한 이미지를 받지 못했습니다. 모든 생성이 실패했을 수 있습니다.");
-        }
-        return allResults;
-
-    } else {
-        // --- LOGIC FOR GEMINI MODEL (direct image modification/remake) ---
-
-        let finalPromptText: string;
-        let finalPromptParts: Part[] = [];
-        
-        let aspectRatioDescription = '';
-        switch(imageAspectRatio) {
-            case '16:9': aspectRatioDescription = "16:9 widescreen landscape"; break;
-            case '9:16': aspectRatioDescription = "9:16 tall portrait"; break;
-            default: aspectRatioDescription = "1:1 square"; break;
-        }
-        const aspectRatioInstruction = `\n\n**MANDATORY OUTPUT FORMAT:** The final image's aspect ratio MUST BE ${aspectRatioDescription}. This is the most critical instruction. Failure to adhere to this aspect ratio will result in an incorrect output. Do not default to a square image unless specifically instructed with '1:1 square'.`;
-        
-        const finalArtistPrompt = ARTIST_STYLE_PROMPT + aspectRatioInstruction + (STYLE_PROMPTS[artStyle] || '');
-        const qualityInstruction = QUALITY_PROMPTS[quality] || '';
-        
-        if (referenceImages.length > 0) {
-          onStatusUpdate("이미지들을 조합하여 그림을 그리는 중...");
-          finalPromptText = `${finalArtistPrompt}\n\n**Task:** Redraw the **base image(s)** (the first image(s) provided) by incorporating the style, mood, and elements from the **reference images** (all subsequent images).\n\n**User's Instructions:** "${userPrompt || 'Combine them creatively.'}"\n\n**Quality Instructions:** ${qualityInstruction}`;
-          finalPromptParts.push({ text: finalPromptText });
-          baseImages.forEach(img => finalPromptParts.push({ inlineData: img }));
-          referenceImages.forEach(img => finalPromptParts.push({ inlineData: img }));
-        } else {
-          onStatusUpdate("이미지를 수정하는 중...");
-          finalPromptText = `**Task:** You are an expert image editor. Edit the provided image based on the user's specific instructions. The output should be a modified version of the original image. Only if no specific edit instruction is given, redraw the image in your signature style.\n\n**Your Signature Style (use if redrawing):**\n${finalArtistPrompt}\n\n**User's Editing Instructions:** "${userPrompt}"\n\n**Quality Instructions:** ${qualityInstruction}`;
-          finalPromptParts.push({ text: finalPromptText });
-          baseImages.forEach(img => finalPromptParts.push({ inlineData: img }));
-        }
-        
-        if (negativePrompt && negativePrompt.trim()) {
-          const negativePromptText = `\n\n**Negative Prompt (Crucial Exclusion):** Under no circumstances should the final image contain any of the following elements or concepts: "${negativePrompt.trim()}". The artist must strictly avoid these.`;
-          (finalPromptParts[0] as { text: string }).text += negativePromptText;
-        }
-
-        const generationPromises = [];
-        for (let i = 0; i < numOutputs; i++) {
-            generationPromises.push(
-                ai.models.generateContent({
-                    model: 'gemini-2.5-flash-image',
-                    contents: { parts: finalPromptParts },
-                    config: { responseModalities: [Modality.IMAGE] },
-                })
-            );
-        }
-
-        const responses = await Promise.all(generationPromises);
-        const allResults: string[] = [];
-        let firstBlockReason: string | undefined = undefined;
-
-
-        responses.forEach(response => {
-            if (!response.candidates || response.candidates.length === 0) {
-                const blockReason = response.promptFeedback?.blockReason;
-                if (blockReason && !firstBlockReason) {
-                    firstBlockReason = blockReason;
-                }
-                console.warn(`하나의 이미지 생성이 차단되었습니다 (이유: ${blockReason}).`);
-                return;
+            const images = await handleGenerateContentResponse(responsePromise);
+            if (images.length > 0) {
+                decomposedElements.push({
+                    name: name,
+                    base64: images[0]
+                });
+            } else {
+                 console.warn(`Could not extract '${name}'. The model did not return an image.`);
             }
 
-            const resultsFromCandidate = response.candidates
-                .map(candidate => {
-                    if (candidate.finishReason && candidate.finishReason !== 'STOP') {
-                        console.warn(`후보 생성이 중단되었습니다: ${candidate.finishReason}`);
-                        return null;
-                    }
-                    const imagePart = candidate.content?.parts?.find(p => p.inlineData);
-                    if (imagePart?.inlineData?.data) {
-                        return imagePart.inlineData.data;
-                    }
-                    console.error("후보에서 이미지 데이터를 찾지 못했습니다:", JSON.stringify(candidate, null, 2));
-                    return null;
-                })
-                .filter((data): data is string => data !== null);
-
-            allResults.push(...resultsFromCandidate);
-        });
-
-        if (allResults.length === 0) {
-            if (firstBlockReason) {
-                throw new Error(getFriendlyBlockReason(firstBlockReason));
-            }
-            throw new Error("API에서 유효한 이미지를 받지 못했습니다. 모든 생성이 실패했거나 예상치 못한 응답 형식이 반환되었습니다.");
+        } catch (error: any) {
+            console.error(`Error decomposing object '${name}':`, error);
         }
-        
-        return allResults;
     }
-  } catch (error) {
-    console.error("Error generating art:", error);
-     if (error instanceof Error) {
-        throw new Error(`아트를 생성하지 못했습니다: ${error.message}`);
+    
+    if (decomposedElements.length === 0) {
+        throw new Error("모든 객체를 분해하는 데 실패했습니다. 다른 이미지를 시도해 보세요.");
     }
-    throw new Error("아트를 생성하지 못했습니다. 다시 시도해주세요.");
-  }
+
+    return decomposedElements;
 };
 
 export const generateVideo = async (
   prompt: string,
-  referenceImages: { mimeType: string; data: string }[],
+  referenceImages: { mimeType: string, data: string }[],
   aspectRatio: AspectRatio,
   resolution: Resolution,
-  onStatusUpdate: (message: string) => void
+  setLoadingMessage: (message: string) => void,
 ): Promise<Blob> => {
-  try {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
-    onStatusUpdate('비디오 생성을 시작합니다...');
     
-    if (referenceImages.length === 0 && !prompt.trim()) {
-      throw new Error("비디오를 생성하려면 참고 이미지가 최소 1개 이상 필요하거나 프롬프트가 있어야 합니다.");
+    let aiForVideo: GoogleGenAI;
+    try {
+        aiForVideo = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+    } catch(e) {
+        throw new Error("API 키를 초기화하는 중 오류가 발생했습니다.");
     }
-    
-    const isMultiImageMode = referenceImages.length > 1;
 
-    let model: string;
-    let finalResolution: Resolution;
-    let finalAspectRatio: AspectRatio;
+    setLoadingMessage('비디오 시나리오를 구성 중입니다...');
 
-    if (isMultiImageMode) {
-        model = 'veo-3.1-generate-preview';
-        finalResolution = '720p'; // VEO multi-image requires 720p
-        finalAspectRatio = '16:9'; // VEO multi-image requires 16:9
-    } else {
-        model = 'veo-3.1-fast-generate-preview';
-        finalResolution = resolution;
-        finalAspectRatio = aspectRatio;
-    }
-    
+    const isMultiImage = referenceImages.length > 1;
+    const model = isMultiImage ? 'veo-3.1-generate-preview' : 'veo-3.1-fast-generate-preview';
+
     let operation;
-    let requestPayload: any = {
-        model: model,
-        prompt: prompt,
-        config: {
-            numberOfVideos: 1,
-            resolution: finalResolution,
-            aspectRatio: finalAspectRatio,
-        }
-    };
-
-    if (referenceImages.length > 0) {
-        if (isMultiImageMode) {
-            requestPayload.config.referenceImages = referenceImages.map(img => ({
-                image: { imageBytes: img.data, mimeType: img.mimeType },
-                referenceType: 'ASSET',
+    try {
+        if (isMultiImage) {
+            const referenceImagesPayload: VideoGenerationReferenceImage[] = referenceImages.map(img => ({
+                image: {
+                    imageBytes: img.data,
+                    mimeType: img.mimeType,
+                },
+                referenceType: VideoGenerationReferenceType.ASSET,
             }));
-        } else { // Single image mode
-            requestPayload.image = {
-                imageBytes: referenceImages[0].data,
-                mimeType: referenceImages[0].mimeType,
-            };
+            
+            operation = await aiForVideo.models.generateVideos({
+                model: model,
+                prompt: prompt,
+                config: {
+                    numberOfVideos: 1,
+                    referenceImages: referenceImagesPayload,
+                    resolution: '720p',
+                    aspectRatio: '16:9'
+                }
+            });
+        } else if (referenceImages.length === 1) {
+             operation = await aiForVideo.models.generateVideos({
+                model: model,
+                prompt: prompt,
+                image: {
+                    imageBytes: referenceImages[0].data,
+                    mimeType: referenceImages[0].mimeType,
+                },
+                config: {
+                    numberOfVideos: 1,
+                    resolution: resolution,
+                    aspectRatio: aspectRatio,
+                }
+            });
+        } else {
+            operation = await aiForVideo.models.generateVideos({
+                model: model,
+                prompt: prompt,
+                config: {
+                    numberOfVideos: 1,
+                    resolution: resolution,
+                    aspectRatio: aspectRatio,
+                }
+            });
         }
+    } catch (err: any) {
+        console.error("Video generation initial request failed:", err);
+        if (err.message?.includes("API key not valid") || err.message?.includes("Requested entity was not found")) {
+            throw new Error("API 키가 유효하지 않거나 찾을 수 없습니다. 다른 키를 선택해주세요.");
+        }
+        throw new Error(err.message || '비디오 생성 요청에 실패했습니다.');
     }
 
-    operation = await ai.models.generateVideos(requestPayload);
-
-    onStatusUpdate('모델이 프롬프트를 분석 중입니다...');
-    
-    const pollIntervals = [
-      { duration: 30000, message: '장면을 구성하고 있습니다... 이 과정은 몇 분 정도 소요될 수 있습니다.' },
-      { duration: 30000, message: '거의 다 됐습니다... 최종 렌더링 중입니다.' },
-    ];
-    let pollIndex = 0;
+    setLoadingMessage('영상을 렌더링하고 있습니다... (최대 몇 분 소요)');
 
     while (!operation.done) {
-      await new Promise(resolve => setTimeout(resolve, 10000));
-      operation = await ai.operations.getVideosOperation({ operation: operation });
-      
-      // Update status message based on polling intervals
-      if (pollIndex < pollIntervals.length && !operation.done) {
-          onStatusUpdate(pollIntervals[pollIndex].message);
-          await new Promise(resolve => setTimeout(resolve, pollIntervals[pollIndex].duration));
-          pollIndex++;
-      } else if (!operation.done) {
-          onStatusUpdate('생성이 예상보다 오래 걸리고 있습니다...');
-      }
+        await new Promise(resolve => setTimeout(resolve, 10000));
+        try {
+            operation = await aiForVideo.operations.getVideosOperation({ operation: operation });
+        } catch(err: any) {
+            console.error("Polling video operation failed:", err);
+            if (err.message?.includes("Requested entity was not found")) {
+                throw new Error("API 키를 찾을 수 없습니다. 다른 키를 선택해주세요.");
+            }
+            throw new Error(err.message || "비디오 상태 확인 중 오류가 발생했습니다.");
+        }
+    }
+
+    if (operation.error) {
+        throw new Error(`비디오 생성 실패: ${operation.error.message}`);
+    }
+
+    const downloadLink = operation.response?.generatedVideos?.[0]?.video?.uri;
+    if (!downloadLink) {
+        throw new Error('생성된 비디오를 찾을 수 없습니다.');
     }
     
-    onStatusUpdate('비디오를 가져오는 중...');
-    const downloadLink = operation.response?.generatedVideos?.[0]?.video?.uri;
-
-    if (!downloadLink) {
-      throw new Error("생성된 비디오 URI를 찾을 수 없습니다.");
+    setLoadingMessage('비디오를 다운로드하고 있습니다...');
+    try {
+        const response = await fetch(`${downloadLink}&key=${process.env.API_KEY as string}`);
+        if (!response.ok) {
+            throw new Error(`비디오 다운로드 실패: ${response.statusText}`);
+        }
+        return await response.blob();
+    } catch (err: any) {
+        console.error("Fetching video blob failed:", err);
+        throw new Error(err.message || "생성된 비디오를 가져오는 데 실패했습니다.");
     }
-    const response = await fetch(`${downloadLink}&key=${process.env.API_KEY!}`);
-    if (!response.ok) {
-        throw new Error(`비디오 다운로드 실패: ${response.statusText}`);
-    }
+};
 
-    return await response.blob();
+export const composeImages = async (
+  baseImages: { mimeType: string; data: string }[],
+  setLoadingMessage: (message: string) => void
+): Promise<string[]> => {
+  setLoadingMessage('이미지들을 분석하고 있습니다...');
 
-  } catch (error) {
-    console.error("Error generating video:", error);
-    if (error instanceof Error) {
-      if (error.message.includes("Requested entity was not found")) {
-        throw new Error("API 키를 찾을 수 없거나 유효하지 않습니다. 다른 키를 선택해주세요.");
-      }
-      throw new Error(`비디오를 생성하지 못했습니다: ${error.message}`);
-    }
-    throw new Error("비디오를 생성하지 못했습니다. 다시 시도해주세요.");
+  const parts: Part[] = baseImages.map(img => ({
+    inlineData: {
+      mimeType: img.mimeType,
+      data: img.data,
+    },
+  }));
+  parts.push({ text: "Combine the provided images into a single, cohesive scene, following the system instructions precisely." });
+
+  try {
+    setLoadingMessage('자연스러운 장면을 구성 중입니다...');
+    
+    const responsePromise = ai.models.generateContent({
+      model: 'gemini-2.5-flash-image',
+      contents: { parts },
+      config: {
+        systemInstruction: COMPOSITION_PROMPT,
+        responseModalities: [Modality.IMAGE],
+      },
+    });
+    
+    setLoadingMessage('합성된 이미지를 완성하고 있습니다...');
+
+    return await handleGenerateContentResponse(responsePromise);
+  } catch (error: any) {
+    console.error("Error composing images:", error);
+    throw new Error(error.message || '이미지 합성 중 오류가 발생했습니다.');
   }
 };
