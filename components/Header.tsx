@@ -1,79 +1,85 @@
-
-import React, { useState, useEffect, useRef } from 'react';
-import { SettingsIcon } from './icons/SettingsIcon';
-import { UserIcon } from './icons/UserIcon';
-import { LogoutIcon } from './icons/LogoutIcon';
+import React, { useState } from 'react';
 
 interface HeaderProps {
-    onSettingsClick: () => void;
-    onLogout: () => void;
+  isDarkMode: boolean;
+  toggleDarkMode: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ onSettingsClick, onLogout }) => {
-  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
+const Header: React.FC<HeaderProps> = ({ isDarkMode, toggleDarkMode }) => {
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
 
-  // Close dropdown when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setIsDropdownOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-    };
-  }, [dropdownRef]);
-
-  const handleSettingsClick = () => {
-    onSettingsClick();
-    setIsDropdownOpen(false);
-  };
+  const navLinks = [
+    { href: '#home', text: 'Home' },
+    { href: '#gallery', text: 'Gallery' },
+    { href: '#artists', text: 'About the Artists' },
+  ];
 
   return (
-    <header className="sticky top-0 z-20 w-full bg-[var(--bg-primary)]/80 backdrop-blur-md border-b border-[var(--border-color)]">
-      <div className="container mx-auto px-4 md:px-8 flex items-center justify-between h-16">
-        {/* Left side: Title */}
-        <div className="flex items-center gap-4">
-          <h1 className="text-xl md:text-2xl font-bold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-teal-300">
-            AI 캐리커쳐 아티스트
-          </h1>
+    <header className="flex items-center justify-between whitespace-nowrap border-b border-solid border-gray-200 dark:border-gray-800 px-4 sm:px-6 py-4">
+      <div className="flex items-center gap-4 text-gray-900 dark:text-gray-100">
+        <div className="size-6 text-primary">
+          <svg fill="none" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+            <path
+              clipRule="evenodd"
+              d="M12.0799 24L4 19.2479L9.95537 8.75216L18.04 13.4961L18.0446 4H29.9554L29.96 13.4961L38.0446 8.75216L44 19.2479L35.92 24L44 28.7521L38.0446 39.2479L29.96 34.5039L29.9554 44H18.0446L18.04 34.5039L9.95537 39.2479L4 28.7521L12.0799 24Z"
+              fill="currentColor"
+              fillRule="evenodd"
+            ></path>
+          </svg>
         </div>
-
-        {/* Right side: User info and settings */}
-        <div className="flex items-center gap-4 md:gap-6">
-          {/* User info dropdown */}
-          <div className="relative" ref={dropdownRef}>
-            <button
-              onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-              className="flex items-center gap-2 text-gray-300 hover:text-white transition-colors"
-              aria-haspopup="true"
-              aria-expanded={isDropdownOpen}
-            >
-              <UserIcon className="w-6 h-6" />
-            </button>
-            {isDropdownOpen && (
-              <div className="absolute right-0 mt-2 w-56 panel-glass rounded-md shadow-lg py-1 animate-fade-in-fast">
-                <button
-                  onClick={handleSettingsClick}
-                  className="flex items-center gap-3 w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-white/10 transition-colors"
-                >
-                  <SettingsIcon className="w-5 h-5" />
-                  <span>설정</span>
-                </button>
-                <button
-                  onClick={onLogout}
-                  className="flex items-center gap-3 w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-red-500/20 transition-colors"
-                >
-                  <LogoutIcon className="w-5 h-5" />
-                  <span>로그아웃</span>
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
+        <h2 className="text-xl font-bold tracking-tight">Fairy Tale Covers</h2>
       </div>
+
+      {/* Desktop Nav */}
+      <div className="hidden md:flex flex-1 justify-end items-center gap-8">
+        <nav className="flex items-center gap-9">
+          {navLinks.map((link) => (
+            <a key={link.href} href={link.href} className="text-gray-800 dark:text-gray-200 text-sm font-medium leading-normal hover:text-primary dark:hover:text-primary transition-colors">
+              {link.text}
+            </a>
+          ))}
+        </nav>
+        <button className="flex min-w-[84px] max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-full h-10 px-4 bg-primary text-white text-sm font-bold leading-normal tracking-[0.015em] hover:bg-primary/90 transition-colors">
+          <span className="truncate">Contact</span>
+        </button>
+        <button onClick={toggleDarkMode} className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+          <span className="material-symbols-outlined text-gray-800 dark:text-gray-200">
+            {isDarkMode ? 'light_mode' : 'dark_mode'}
+          </span>
+        </button>
+      </div>
+
+      {/* Mobile Nav */}
+      <div className="md:hidden flex items-center">
+         <button onClick={toggleDarkMode} className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+          <span className="material-symbols-outlined text-gray-800 dark:text-gray-200">
+            {isDarkMode ? 'light_mode' : 'dark_mode'}
+          </span>
+        </button>
+        <button onClick={() => setIsMenuOpen(!isMenuOpen)} className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+          <span className="material-symbols-outlined text-gray-800 dark:text-gray-200">
+            {isMenuOpen ? 'close' : 'menu'}
+          </span>
+        </button>
+      </div>
+
+      {/* Mobile Menu */}
+      {isMenuOpen && (
+        <div className="absolute top-full right-0 mt-2 w-48 bg-white dark:bg-background-dark rounded-md shadow-lg p-2 md:hidden">
+          <nav className="flex flex-col gap-2">
+            {navLinks.map((link) => (
+              <a key={link.href} href={link.href} onClick={() => setIsMenuOpen(false)} className="text-gray-800 dark:text-gray-200 p-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+                {link.text}
+              </a>
+            ))}
+             <a href="#" onClick={() => setIsMenuOpen(false)} className="text-gray-800 dark:text-gray-200 p-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+                Contact
+              </a>
+          </nav>
+        </div>
+      )}
     </header>
   );
 };
+
+export default Header;
