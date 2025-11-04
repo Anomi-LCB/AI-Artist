@@ -7,9 +7,10 @@ import { LogoutIcon } from './icons/LogoutIcon';
 interface HeaderProps {
     onSettingsClick: () => void;
     onLogout: () => void;
+    userName: string;
 }
 
-export const Header: React.FC<HeaderProps> = ({ onSettingsClick, onLogout }) => {
+export const Header: React.FC<HeaderProps> = ({ onSettingsClick, onLogout, userName }) => {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -51,6 +52,7 @@ export const Header: React.FC<HeaderProps> = ({ onSettingsClick, onLogout }) => 
               aria-haspopup="true"
               aria-expanded={isDropdownOpen}
             >
+              <span className="hidden md:block font-medium">{userName}님</span>
               <UserIcon className="w-6 h-6" />
             </button>
             {isDropdownOpen && (

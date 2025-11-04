@@ -159,7 +159,7 @@ export const ImageInput: React.FC<ImageInputProps> = ({ files, onFilesChange, is
   }, [files, onFilesChange]);
 
   const dropzoneClasses = `
-    relative flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-lg cursor-pointer 
+    relative flex flex-col items-center justify-center w-full h-28 border-2 border-dashed rounded-lg cursor-pointer 
     transition-all
     ${isLoading ? 'cursor-not-allowed bg-black/20 border-gray-700' :
       isDragging 
@@ -167,6 +167,8 @@ export const ImageInput: React.FC<ImageInputProps> = ({ files, onFilesChange, is
         : 'bg-black/20 border-gray-600 hover:border-purple-400 hover:bg-black/30'
     }
   `;
+
+  const showDropzone = !replace || files.length === 0;
 
   return (
     <div className="w-full">
@@ -182,31 +184,33 @@ export const ImageInput: React.FC<ImageInputProps> = ({ files, onFilesChange, is
             ))}
         </div>
       )}
-      <label
-        htmlFor={inputId}
-        className={dropzoneClasses}
-        onDragEnter={handleDragEnter}
-        onDragLeave={handleDragLeave}
-        onDragOver={handleDragOver}
-        onDrop={handleDrop}
-      >
-        <div className="flex flex-col items-center justify-center pt-5 pb-6 text-center">
-            <svg className="w-8 h-8 mb-4 text-gray-500" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 16">
-              <path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 13h3a3 3 0 0 0 0-6h-.025A5.56 5.56 0 0 0 16 6.5 5.5 5.5 0 0 0 5.207 5.021C5.137 5.017 5.071 5 5 5a4 4 0 0 0 0 8h2.167M10 15V6m0 0L8 8m2-2 2 2" />
-            </svg>
-            <p className="mb-2 text-sm text-gray-400"><span className="font-semibold text-purple-400">클릭하여 업로드</span>하거나 드래그 앤 드롭하세요</p>
-            <p className="text-xs text-gray-500">PNG, JPG, WEBP 등 (최대 {maxFiles || '제한 없음'})</p>
-          </div>
-        <input 
-          id={inputId}
-          type="file" 
-          className="hidden" 
-          onChange={handleFileChange}
-          accept="image/*"
-          disabled={isLoading}
-          multiple
-        />
-      </label>
+      {showDropzone && (
+        <label
+            htmlFor={inputId}
+            className={dropzoneClasses}
+            onDragEnter={handleDragEnter}
+            onDragLeave={handleDragLeave}
+            onDragOver={handleDragOver}
+            onDrop={handleDrop}
+        >
+            <div className="flex flex-col items-center justify-center pt-5 pb-6 text-center">
+                <svg className="w-8 h-8 mb-4 text-gray-500" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 16">
+                <path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 13h3a3 3 0 0 0 0-6h-.025A5.56 5.56 0 0 0 16 6.5 5.5 5.5 0 0 0 5.207 5.021C5.137 5.017 5.071 5 5 5a4 4 0 0 0 0 8h2.167M10 15V6m0 0L8 8m2-2 2 2" />
+                </svg>
+                <p className="mb-2 text-sm text-gray-400"><span className="font-semibold text-purple-400">클릭하여 업로드</span>하거나 드래그 앤 드롭하세요</p>
+                <p className="text-xs text-gray-500">PNG, JPG, WEBP 등 (최대 {maxFiles || '제한 없음'})</p>
+            </div>
+            <input 
+                id={inputId}
+                type="file" 
+                className="hidden" 
+                onChange={handleFileChange}
+                accept="image/*"
+                disabled={isLoading}
+                multiple={!replace}
+            />
+        </label>
+      )}
       {error && <p className="mt-2 text-sm text-red-500 animate-fade-in">{error}</p>}
     </div>
   );

@@ -1,9 +1,22 @@
-
-
-import { useState, useCallback, useReducer, useEffect } from 'react';
-import { generateArt, generateVideo, expandPrompt, decomposeImage, composeImages } from '../services/geminiService';
+// FIX: Import React to resolve namespace error for React.MouseEvent
+import React, { useState, useCallback, useReducer, useEffect } from 'react';
+import { 
+    generateArt, 
+    generateVideo, 
+    expandPrompt, 
+    decomposeImage,
+    decomposeImageIntoLayers,
+    composeImages,
+    removeBackground,
+    generativeFill,
+    resizeImage,
+    extractObjectAtPoint,
+    colorizeImage,
+    remixImageStyle,
+} from '../services/geminiService';
 import { fileToBase64 } from '../utils/fileUtils';
-import { ArtStyleId, QualityId, AppSettings, ImageAspectRatio, AspectRatio, Resolution, DecomposedImageElement } from '../types';
+import { ArtStyleId, QualityId, AppSettings, ImageAspectRatio, AspectRatio, Resolution, DecomposedImageElement, DecomposedLayer, EditState } from '../types';
+import { artStyleOptions } from '../constants';
 
 // --- IMAGE GENERATION HOOK ---
 
@@ -210,6 +223,7 @@ export const useVideoGeneration = ({ isLoading, setIsLoading, setError, setLoadi
 interface DecompositionState {
   inputFile: File | null;
   decomposedElements: DecomposedImageElement[];
+  decomposedLayers: DecomposedLayer[];
 }
 
 interface UseImageDecompositionProps {
@@ -222,20 +236,21 @@ export const useImageDecomposition = ({ setIsLoading, setError, setLoadingMessag
   const [decompositionState, setDecompositionState] = useState<DecompositionState>({
     inputFile: null,
     decomposedElements: [],
+    decomposedLayers: [],
   });
 
   const setDecompositionInputFile = (file: File | null) => {
-    setDecompositionState({ inputFile: file, decomposedElements: [] });
+    setDecompositionState({ inputFile: file, decomposedElements: [], decomposedLayers: [] });
     setError(null);
   };
 
-  const handleDecompose = useCallback(async () => {
+  const handleDecompose = useCallback(async (prompt: string) => {
     if (!decompositionState.inputFile) {
       setError('분해할 이미지를 업로드해주세요.');
       return;
     }
     setError(null);
-    setDecompositionState(prev => ({ ...prev, decomposedElements: [] }));
+    setDecompositionState(prev => ({ ...prev, decomposedElements: [], decomposedLayers: [] }));
     setIsLoading(true);
     setLoadingMessage('분해 작업을 준비 중입니다...');
 
@@ -245,7 +260,7 @@ export const useImageDecomposition = ({ setIsLoading, setError, setLoadingMessag
         data: await fileToBase64(decompositionState.inputFile),
       };
 
-      const elements = await decomposeImage(baseImage, setLoadingMessage);
+      const elements = await decomposeImage(baseImage, prompt, setLoadingMessage);
       setDecompositionState(prev => ({ ...prev, decomposedElements: elements }));
 
     } catch (err: any) {
@@ -256,13 +271,66 @@ export const useImageDecomposition = ({ setIsLoading, setError, setLoadingMessag
       setLoadingMessage('');
     }
   }, [decompositionState.inputFile, setIsLoading, setError, setLoadingMessage]);
+  
+  const handleLayerDecompose = useCallback(async (prompt: string) => {
+    if (!decompositionState.inputFile) {
+      setError('분해할 이미지를 업로드해주세요.');
+      return;
+    }
+    setError(null);
+    setDecompositionState(prev => ({ ...prev, decomposedElements: [], decomposedLayers: [] }));
+    setIsLoading(true);
+    setLoadingMessage('레이어 분해 작업을 준비 중입니다...');
+
+    try {
+      const baseImage = {
+        mimeType: decompositionState.inputFile.type,
+        data: await fileToBase64(decompositionState.inputFile),
+      };
+
+      const layers = await decomposeImageIntoLayers(baseImage, prompt, setLoadingMessage);
+      setDecompositionState(prev => ({ ...prev, decomposedLayers: layers }));
+
+    } catch (err: any) {
+      setError(err.message || '알 수 없는 오류가 발생했습니다.');
+      setDecompositionState(prev => ({ ...prev, decomposedLayers: [] }));
+    } finally {
+      setIsLoading(false);
+      setLoadingMessage('');
+    }
+  }, [decompositionState.inputFile, setIsLoading, setError, setLoadingMessage]);
+
+  const handleInteractiveDecompose = useCallback(async (
+    originalImage: { mimeType: string; data: string },
+    imageWithMarker: { mimeType: string; data: string }
+    ) => {
+    setError(null);
+    setIsLoading(true);
+    setLoadingMessage('선택한 객체 추출 중...');
+    
+    try {
+      const element = await extractObjectAtPoint(originalImage, imageWithMarker, setLoadingMessage);
+      setDecompositionState(prev => ({
+        ...prev,
+        decomposedElements: [...prev.decomposedElements, element]
+      }));
+    } catch (err: any) {
+      setError(err.message || '객체 추출 중 오류 발생');
+    } finally {
+      setIsLoading(false);
+      setLoadingMessage('');
+    }
+  }, [setIsLoading, setError, setLoadingMessage]);
 
   const isDecompositionDisabled = !decompositionState.inputFile;
 
   return {
     decompositionState,
+    setDecompositionState,
     setDecompositionInputFile,
     handleDecompose,
+    handleLayerDecompose,
+    handleInteractiveDecompose,
     isDecompositionDisabled,
   };
 };
@@ -291,7 +359,7 @@ export const useImageComposition = ({ setIsLoading, setError, setLoadingMessage 
     setError(null);
   };
 
-  const handleCompose = useCallback(async () => {
+  const handleCompose = useCallback(async (prompt: string) => {
     if (compositionState.inputFiles.length < 2) {
       setError('합성하려면 2개 이상의 이미지를 업로드해주세요.');
       return;
@@ -309,7 +377,7 @@ export const useImageComposition = ({ setIsLoading, setError, setLoadingMessage 
         }))
       );
 
-      const [result] = await composeImages(imageUploads, setLoadingMessage);
+      const [result] = await composeImages(imageUploads, prompt, setLoadingMessage);
       
       if (result) {
         setCompositionState(prev => ({ ...prev, composedImage: result }));
@@ -333,5 +401,67 @@ export const useImageComposition = ({ setIsLoading, setError, setLoadingMessage 
     setCompositionInputFiles,
     handleCompose,
     isCompositionDisabled,
+  };
+};
+
+// --- IMAGE EDITING HOOK ---
+interface UseImageEditingProps {
+  setIsLoading: (loading: boolean) => void;
+  setError: (error: string | null) => void;
+  setLoadingMessage: (message: string) => void;
+}
+
+export const useImageEditing = ({ setIsLoading, setError, setLoadingMessage }: UseImageEditingProps) => {
+  const [editState, setEditState] = useState<EditState>({
+    inputFile: null,
+    resultImage: null,
+    activeEditor: null,
+    resizeOption: '2x',
+    remixStyle: artStyleOptions[0].id,
+  });
+
+  const performEditAction = async (action: (image: { mimeType: string; data: string }, ...args: any) => Promise<string[]>, ...args: any) => {
+    if (!editState.inputFile) {
+      setError('편집할 이미지를 업로드해주세요.');
+      return;
+    }
+    setError(null);
+    setEditState(prev => ({ ...prev, resultImage: null }));
+    setIsLoading(true);
+
+    try {
+      const baseImage = {
+        mimeType: editState.inputFile.type,
+        data: await fileToBase64(editState.inputFile),
+      };
+      const [result] = await action(baseImage, ...args);
+      if (result) {
+        setEditState(prev => ({ ...prev, resultImage: result }));
+      } else {
+        throw new Error('AI가 편집된 이미지를 반환하지 않았습니다.');
+      }
+    } catch (err: any) {
+      setError(err.message || '알 수 없는 오류가 발생했습니다.');
+    } finally {
+      setIsLoading(false);
+      setLoadingMessage('');
+    }
+  };
+
+  const handleRemoveBackground = () => performEditAction(removeBackground, setLoadingMessage);
+  const handleResize = () => performEditAction(resizeImage, editState.resizeOption, setLoadingMessage);
+  const handleColorize = () => performEditAction(colorizeImage, setLoadingMessage);
+  const handleStyleRemix = () => performEditAction(remixImageStyle, editState.remixStyle, setLoadingMessage);
+  
+  const isEditDisabled = !editState.inputFile;
+
+  return {
+    editState,
+    setEditState,
+    handleRemoveBackground,
+    handleStyleRemix,
+    handleResize,
+    handleColorize,
+    isEditDisabled,
   };
 };

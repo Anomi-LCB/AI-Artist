@@ -1,37 +1,37 @@
 
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, MouseEvent } from 'react';
 import { Header } from './components/Header';
 import { ImageInput } from './components/ImageInput';
 import { ArtDisplay } from './components/ArtDisplay';
 import { VideoDisplay } from './components/VideoDisplay';
 import { ExtractionDisplay } from './components/ExtractionDisplay';
 import { CompositionDisplay } from './components/CompositionDisplay';
-import { SparklesIcon } from './components/icons/SparklesIcon';
+import { EditDisplay } from './components/EditDisplay';
 import { PhotoIcon } from './components/icons/PhotoIcon';
 import { VideoCameraIcon } from './components/icons/VideoCameraIcon';
 import { ExtractIcon } from './components/icons/ExtractIcon';
 import { CombineIcon } from './components/icons/CombineIcon';
+import { MagicWandIcon } from './components/icons/MagicWandIcon';
 import { UndoIcon } from './components/icons/UndoIcon';
 import { InfoIcon } from './components/icons/InfoIcon';
-import { useImageGeneration, useVideoGeneration, useImageDecomposition, useImageComposition } from './hooks/generationHooks';
-import { base64ToFile } from './utils/fileUtils';
+import { useImageGeneration, useVideoGeneration, useImageDecomposition, useImageComposition, useImageEditing } from './hooks/generationHooks';
+import { base64ToFile, fileToImage, fileToBase64 } from './utils/fileUtils';
 import { Workspace } from './components/Workspace';
 import { StyleSelector } from './components/StyleSelector';
 import { SettingsModal } from './components/SettingsModal';
 import { Lightbox } from './components/Lightbox';
-import { WorkspaceCreation, AppSettings, ToastMessage, DecomposedImageElement, LightboxContent } from './types';
-import { artStyleOptions, qualityOptions, imageAspectRatioOptions, inspirationalPrompts } from './constants';
+import { WorkspaceCreation, AppSettings, ToastMessage, DecomposedImageElement, LightboxContent, Mode, EditSubMode } from './types';
+import { artStyleOptions, qualityOptions, imageAspectRatioOptions } from './constants';
 import { getAllCreations, addCreation, deleteCreation, clearAllCreations } from './lib/db';
-import { GettingStartedPage } from './components/GettingStartedPage';
+import { LoginPage } from './components/LoginPage';
 import { Toast } from './components/Toast';
-import { InspirationDisplay } from './components/InspirationDisplay';
-import { LightbulbIcon } from './components/icons/LightbulbIcon';
 import { TrashIcon } from './components/icons/TrashIcon';
-
-type Mode = 'image' | 'composition' | 'video' | 'decomposition';
+import { SparklesIcon } from './components/icons/SparklesIcon';
+import { InspirationDisplay } from './components/InspirationDisplay';
 
 const SETTINGS_STORAGE_KEY = 'gemini-artist-settings';
+const USER_STORAGE_KEY = 'gemini-artist-username';
 
 const DEFAULT_SETTINGS: AppSettings = {
   defaultArtStyle: artStyleOptions[0].id,
@@ -41,7 +41,7 @@ const DEFAULT_SETTINGS: AppSettings = {
 };
 
 const App: React.FC = () => {
-  const [hasStarted, setHasStarted] = useState<boolean>(false);
+  const [userName, setUserName] = useState<string | null>(null);
   const [mode, setMode] = useState<Mode>('image');
   
   // Shared state
@@ -54,6 +54,14 @@ const App: React.FC = () => {
   const [savedCreations, setSavedCreations] = useState<WorkspaceCreation[]>([]);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [editingCreationId, setEditingCreationId] = useState<number | null>(null);
+  const [showInspiration, setShowInspiration] = useState(false);
+  
+  // Mode-specific state
+  const [compositionPrompt, setCompositionPrompt] = useState('');
+  const [decompositionPrompt, setDecompositionPrompt] = useState('');
+  const [decompositionSubMode, setDecompositionSubMode] = useState<'auto' | 'interactive' | 'layer'>('auto');
+  const [editSubMode, setEditSubMode] = useState<EditSubMode>('style-remix');
+
 
   const addToast = useCallback((message: string, type: 'success' | 'error') => {
     const id = Date.now();
@@ -97,10 +105,24 @@ const App: React.FC = () => {
   // Image Decomposition Hook
   const {
     decompositionState,
+    setDecompositionState,
     handleDecompose,
+    handleLayerDecompose,
+    handleInteractiveDecompose,
     setDecompositionInputFile,
     isDecompositionDisabled
   } = useImageDecomposition({ setIsLoading, setError, setLoadingMessage });
+  
+  // Image Editing Hook
+  const {
+    editState,
+    setEditState,
+    handleRemoveBackground,
+    handleStyleRemix,
+    handleResize,
+    handleColorize,
+    isEditDisabled
+  } = useImageEditing({ setIsLoading, setError, setLoadingMessage });
 
   // Image Composition Hook
   const {
@@ -126,6 +148,60 @@ const App: React.FC = () => {
         addToast('요소를 불러오지 못했습니다.', 'error');
     }
   }, [setBaseImageFiles, dispatchImageGenState, setGeneratedImages, setIsBaseImageHighlighted, addToast]);
+  
+  const handleInteractiveDecompositionClick = async (event: MouseEvent<HTMLImageElement>) => {
+    if (!decompositionState.inputFile) return;
+
+    const originalFile = decompositionState.inputFile;
+    const imgElement = event.currentTarget;
+    const rect = imgElement.getBoundingClientRect();
+
+    // Calculate the click coordinates relative to the image's natural dimensions
+    const scaleX = imgElement.naturalWidth / rect.width;
+    const scaleY = imgElement.naturalHeight / rect.height;
+
+    const x = (event.clientX - rect.left) * scaleX;
+    const y = (event.clientY - rect.top) * scaleY;
+    
+    setIsLoading(true);
+    setLoadingMessage("클릭한 위치 분석 중...");
+    setError(null);
+
+    try {
+        const image = await fileToImage(originalFile);
+        const canvas = document.createElement('canvas');
+        canvas.width = image.naturalWidth;
+        canvas.height = image.naturalHeight;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error("Canvas context를 가져올 수 없습니다.");
+
+        // Draw original image
+        ctx.drawImage(image, 0, 0);
+
+        // Draw a marker
+        const markerRadius = Math.min(image.naturalWidth, image.naturalHeight) * 0.01; // Marker size relative to image size
+        ctx.beginPath();
+        ctx.arc(x, y, markerRadius, 0, 2 * Math.PI, false);
+        ctx.fillStyle = 'red';
+        ctx.fill();
+
+        const dataUrlWithMarker = canvas.toDataURL('image/png');
+        const base64WithMarker = dataUrlWithMarker.split(',')[1];
+        
+        const originalBase64 = await fileToBase64(originalFile);
+        
+        await handleInteractiveDecompose(
+            { mimeType: originalFile.type, data: originalBase64 },
+            { mimeType: 'image/png', data: base64WithMarker }
+        );
+
+    } catch(err) {
+       setError(err instanceof Error ? err.message : "이미지 처리 중 오류 발생");
+    } finally {
+       setIsLoading(false);
+       setLoadingMessage("");
+    }
+  };
 
   const handleUseFromLightbox = (content: LightboxContent) => {
     if (content.type === 'decomposed' && content.saveData) {
@@ -134,16 +210,13 @@ const App: React.FC = () => {
     }
   };
 
-
-  // Check for session on mount
   useEffect(() => {
-    const started = sessionStorage.getItem('hasStarted');
-    if (started === 'true') {
-      setHasStarted(true);
+    const storedName = localStorage.getItem(USER_STORAGE_KEY);
+    if (storedName) {
+      setUserName(storedName);
     }
   }, []);
 
-  // Check for VEO key when mode changes
   useEffect(() => {
     const checkVeoKey = async () => {
       if (mode === 'video') {
@@ -208,26 +281,17 @@ const App: React.FC = () => {
         addToast("워크스페이스를 비우는 데 실패했습니다.", "error");
     }
   };
+  
+  const handleLogin = (name: string) => {
+    localStorage.setItem(USER_STORAGE_KEY, name);
+    setUserName(name);
+  };
 
   const handleLogout = () => {
+    localStorage.removeItem(USER_STORAGE_KEY);
     sessionStorage.clear();
-    setHasStarted(false);
-    setSavedCreations([]);
+    setUserName(null);
   };
-
-  const handleStart = () => {
-    sessionStorage.setItem('hasStarted', 'true');
-    setHasStarted(true);
-  };
-
-  const handleInspireMe = useCallback(() => {
-    const randomPrompt = inspirationalPrompts[Math.floor(Math.random() * inspirationalPrompts.length)];
-    if (mode === 'image') {
-      dispatchImageGenState({ type: 'SET_FIELD', field: 'prompt', value: randomPrompt });
-    } else {
-      setVideoState(prev => ({...prev, prompt: randomPrompt}));
-    }
-  }, [mode, dispatchImageGenState, setVideoState]);
 
   const handleSaveCreation = useCallback(async (data: string | Blob, type: 'image' | 'video', silent = false) => {
       try {
@@ -292,6 +356,8 @@ const App: React.FC = () => {
     setMode(newMode);
     setError(null);
     setIsBaseImageHighlighted(false);
+    setCompositionPrompt('');
+    setDecompositionPrompt('');
   };
 
   const handleDecomposedElementClick = useCallback((element: DecomposedImageElement) => {
@@ -315,6 +381,28 @@ const App: React.FC = () => {
       downloadName: content.downloadName,
       saveData: data,
     });
+  };
+
+  const handleSelectInspiration = (prompt: string) => {
+    dispatchImageGenState({ type: 'SET_FIELD', field: 'prompt', value: prompt });
+    setShowInspiration(false);
+  };
+
+  const handleEditSubModeChange = async (newSubMode: EditSubMode) => {
+    if (editState.resultImage) {
+        try {
+            const newFile = await base64ToFile(editState.resultImage, `chained-edit-${Date.now()}.png`, 'image/png');
+            setEditState(prev => ({
+                ...prev,
+                inputFile: newFile,
+                resultImage: null,
+            }));
+        } catch (err) {
+            console.error("Error creating file from result image:", err);
+            addToast("다음 편집을 위해 이미지를 준비하는 데 실패했습니다.", "error");
+        }
+    }
+    setEditSubMode(newSubMode);
   };
 
   const ModeButton: React.FC<{ active: boolean, onClick: () => void, children: React.ReactNode}> = ({ active, onClick, children }) => (
@@ -357,6 +445,42 @@ const App: React.FC = () => {
         </button>
     </div>
   );
+  
+  const EditTabButton: React.FC<{ active: boolean, onClick: () => void, disabled?: boolean, children: React.ReactNode}> = ({ active, onClick, disabled, children }) => (
+    <button onClick={onClick} disabled={disabled} className={`flex-1 flex items-center justify-center text-center px-3 py-2 text-sm font-semibold rounded-lg transition-all duration-200 border-2 ${active ? 'bg-teal-500 border-teal-500 text-white shadow-[0_0_10px_rgba(56,178,172,0.7)]' : 'bg-gray-700/50 border-gray-600 hover:border-purple-500 text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed'}`}>
+       {children}
+   </button>
+ );
+
+  const handleExecuteEdit = () => {
+    if (!editState.inputFile) return;
+
+    setEditState(p => ({ ...p, resultImage: null, activeEditor: editSubMode }));
+    
+    switch(editSubMode) {
+        case 'remove-bg':
+            handleRemoveBackground();
+            break;
+        case 'style-remix':
+            handleStyleRemix();
+            break;
+        case 'resize':
+            handleResize();
+            break;
+        case 'colorize':
+            handleColorize();
+            break;
+    }
+  };
+
+  const editButtonTextMap: Record<EditSubMode, string> = {
+    'remove-bg': '배경 제거 실행',
+    'style-remix': '스타일 리믹스 실행',
+    'resize': '해상도 조절 실행',
+    'colorize': 'AI 채색 실행',
+  };
+
+  const isEditExecuteDisabled = isEditDisabled;
 
   const imageGenerationButtonText = (() => {
     if (baseImageFiles.length > 0 && referenceImageFiles.length > 0) {
@@ -371,7 +495,9 @@ const App: React.FC = () => {
     return "아트 생성";
   })();
 
-  if (!hasStarted) return <GettingStartedPage onStart={handleStart} />;
+  if (!userName) {
+    return <LoginPage onLoginSuccess={handleLogin} />;
+  }
 
   const rightPanelContent = () => {
     switch(mode) {
@@ -392,22 +518,36 @@ const App: React.FC = () => {
         return <ExtractionDisplay 
                   originalImage={decompositionState.inputFile}
                   decomposedElements={decompositionState.decomposedElements}
+                  decomposedLayers={decompositionState.decomposedLayers}
                   isLoading={isLoading}
                   error={error}
                   loadingMessage={loadingMessage}
                   onUseElement={handleUseDecomposedElement}
                   onSaveElement={handleSaveDecomposedElement}
                   onElementClick={handleDecomposedElementClick}
+                  subMode={decompositionSubMode}
+                  onInteractiveClick={handleInteractiveDecompositionClick}
+                  onLayersChange={(layers) => setDecompositionState(p => ({...p, decomposedLayers: layers}))}
+                  onSave={handleSaveCreation}
                />;
+      case 'edit':
+        return <EditDisplay
+                  state={editState}
+                  isLoading={isLoading}
+                  error={error}
+                  loadingMessage={loadingMessage}
+                  onSave={(image) => handleSaveCreation(image, 'image')}
+                  onImageClick={onImageClick}
+                  title={editButtonTextMap[editSubMode]}
+                />;
       default:
         return null;
     }
   };
 
-
   return (
     <div className="min-h-screen flex flex-col">
-      <Header onSettingsClick={() => setIsSettingsOpen(true)} onLogout={handleLogout} />
+      <Header userName={userName} onSettingsClick={() => setIsSettingsOpen(true)} onLogout={handleLogout} />
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} onSave={handleSaveSettings} currentSettings={appSettings} onClearWorkspace={handleClearWorkspace} />
       <Lightbox 
         content={lightboxContent} 
@@ -439,8 +579,9 @@ const App: React.FC = () => {
         <div className="w-full max-w-5xl flex flex-col lg:flex-row gap-8">
           {/* Left Panel: Controls */}
           <div className="w-full lg:w-1/2 flex flex-col">
-            <div className="grid grid-cols-4 panel-glass rounded-t-2xl border-b-0">
+            <div className="grid grid-cols-5 panel-glass rounded-t-2xl border-b-0">
                 <ModeButton active={mode === 'image'} onClick={() => handleModeChange('image')}><PhotoIcon className="w-5 h-5" /><span className="whitespace-nowrap">이미지 생성</span></ModeButton>
+                <ModeButton active={mode === 'edit'} onClick={() => handleModeChange('edit')}><MagicWandIcon className="w-5 h-5" /><span className="whitespace-nowrap">이미지 편집</span></ModeButton>
                 <ModeButton active={mode === 'composition'} onClick={() => handleModeChange('composition')}><CombineIcon className="w-5 h-5" /><span className="whitespace-nowrap">이미지 합성</span></ModeButton>
                 <ModeButton active={mode === 'decomposition'} onClick={() => handleModeChange('decomposition')}><ExtractIcon className="w-5 h-5" /><span className="whitespace-nowrap">이미지 분해</span></ModeButton>
                 <ModeButton active={mode === 'video'} onClick={() => handleModeChange('video')}><VideoCameraIcon className="w-5 h-5" /><span className="whitespace-nowrap">비디오 생성</span></ModeButton>
@@ -452,22 +593,25 @@ const App: React.FC = () => {
                   <StyleSelector styles={artStyleOptions} selectedStyle={imageGenState.artStyle} onSelect={(value) => dispatchImageGenState({ type: 'SET_FIELD', field: 'artStyle', value })} disabled={isLoading}/>
                   
                   <div>
-                    <label htmlFor="prompt" className="block text-lg font-semibold mb-2 text-teal-300">{baseImageFiles.length > 0 ? "이미지 수정하기" : "프롬프트"}</label>
+                    <label htmlFor="prompt" className="flex items-center gap-2 text-lg font-semibold mb-2 text-teal-300">
+                      {baseImageFiles.length > 0 ? "이미지 수정하기" : "프롬프트"}
+                      <button onClick={() => setShowInspiration(!showInspiration)} title="프롬프트 아이디어 얻기" className="text-yellow-300 hover:text-yellow-400 transition-colors">
+                        <SparklesIcon className="w-5 h-5" />
+                      </button>
+                    </label>
                     <div className="relative">
+                      {showInspiration && (
+                        <InspirationDisplay
+                          onSelect={handleSelectInspiration}
+                          onClose={() => setShowInspiration(false)}
+                        />
+                      )}
                       <textarea id="prompt" value={imageGenState.prompt} onChange={(e) => dispatchImageGenState({ type: 'SET_FIELD', field: 'prompt', value: e.target.value })} placeholder={baseImageFiles.length > 0 ? "예: 캐릭터에게 왕관을 씌워주세요..." : "예: 폭풍우가 치는 바다 위의 노아의 방주..."} className="w-full h-36 p-3 bg-gray-900 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition" disabled={isLoading}/>
                       <div className="absolute bottom-3 right-3 flex items-center gap-2">
                         {imageGenState.originalPrompt && (<button onClick={() => dispatchImageGenState({ type: 'REVERT_PROMPT' })} disabled={isLoading} title="원래대로" className="text-gray-400 hover:text-purple-400 transition-colors disabled:opacity-50"><UndoIcon className="w-5 h-5" /></button>)}
-                        <button onClick={handleInspireMe} disabled={isLoading} title="영감 얻기" className="text-gray-400 hover:text-purple-400 transition-colors disabled:opacity-50"><LightbulbIcon className="w-5 h-5" /></button>
                       </div>
                     </div>
                   </div>
-
-                  {!imageGenState.prompt.trim() && baseImageFiles.length === 0 && referenceImageFiles.length === 0 && (
-                    <InspirationDisplay 
-                        onSelectPrompt={(prompt) => dispatchImageGenState({ type: 'SET_FIELD', field: 'prompt', value: prompt })} 
-                        disabled={isLoading} 
-                    />
-                  )}
                   
                   <div>
                     <label htmlFor="negative-prompt" className="block text-lg font-semibold mb-2 text-teal-300">제외할 내용 <span className="text-sm text-gray-400 font-normal">(선택 사항)</span></label>
@@ -476,14 +620,14 @@ const App: React.FC = () => {
 
                   <div>
                     <div className="mb-2">
-                      <LabeledSection title="이미지 편집 / 리메이크" tooltip="여기에 업로드된 이미지를 직접 수정, 변형, 또는 리메이크합니다." />
+                      <LabeledSection title="원본 이미지" tooltip="수정, 변형, 또는 리메이크할 기본 이미지를 업로드하세요." />
                     </div>
                     <ImageInput files={baseImageFiles} onFilesChange={(files) => { setBaseImageFiles(files); setIsBaseImageHighlighted(false); }} isLoading={isLoading} maxFiles={5} highlight={isBaseImageHighlighted} />
                   </div>
 
                   <div>
                      <div className="mb-2">
-                      <LabeledSection title="참고 (스타일 / 영감)" tooltip="영감을 주거나 스타일, 캐릭터, 특정 요소를 추가하는 데 사용됩니다. 이 이미지는 직접 수정되지 않습니다." />
+                      <LabeledSection title="참고 이미지 (캐릭터 고정)" tooltip="캐릭터의 일관성을 유지하려면 여기에 캐릭터 이미지를 업로드하세요. AI가 이 캐릭터의 특징을 유지하며 새로운 장면을 생성합니다." />
                     </div>
                     <ImageInput files={referenceImageFiles} onFilesChange={setReferenceImageFiles} isLoading={isLoading} maxFiles={10} />
                   </div>
@@ -505,11 +649,95 @@ const App: React.FC = () => {
                     </div>
                   </div>
                   
-                  <button onClick={handleImageGenerate} disabled={isImageGenerateDisabled} className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-purple-600 to-teal-500 text-white font-bold py-4 px-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed hover:from-purple-700 hover:to-teal-600 shadow-lg hover:shadow-purple-500/50">
-                    <SparklesIcon className="w-6 h-6" />
+                  <button onClick={handleImageGenerate} disabled={isImageGenerateDisabled} className="w-full flex items-center justify-center bg-gradient-to-r from-purple-600 to-teal-500 text-white font-bold py-4 px-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed hover:from-purple-700 hover:to-teal-600 shadow-lg hover:shadow-purple-500/50">
                     <span>{imageGenerationButtonText}</span>
                   </button>
                   {imageGenState.originalPrompt && (<p className="text-xs text-center text-gray-400">프롬프트가 확장되었습니다. <button onClick={() => dispatchImageGenState({ type: 'REVERT_PROMPT' })} className="underline hover:text-purple-400">되돌리기</button></p>)}
+                </>
+              )}
+               {mode === 'edit' && (
+                <>
+                  <div className="space-y-6">
+                    <div>
+                      <LabeledSection title="편집할 이미지" tooltip="편집할 이미지를 업로드하세요. 모든 편집 기능은 이 이미지에 적용됩니다." />
+                      <ImageInput 
+                        files={editState.inputFile ? [editState.inputFile] : []} 
+                        onFilesChange={(files) => {
+                          const newFile = files[0] || null;
+                          setEditState(p=>({...p, 
+                            inputFile: newFile, 
+                            resultImage: null, 
+                          }));
+                        }} 
+                        isLoading={isLoading} 
+                        maxFiles={1} 
+                        replace 
+                      />
+                    </div>
+
+                    {editState.inputFile && (
+                      <div className="space-y-4 animate-fade-in">
+                        <div>
+                          <label className="block text-lg font-semibold text-teal-300 mb-2">편집 기능 선택</label>
+                          <div className="grid grid-cols-2 sm:grid-cols-2 gap-2">
+                            <EditTabButton active={editSubMode === 'style-remix'} onClick={() => handleEditSubModeChange('style-remix')} disabled={isLoading}>스타일 리믹스</EditTabButton>
+                            <EditTabButton active={editSubMode === 'remove-bg'} onClick={() => handleEditSubModeChange('remove-bg')} disabled={isLoading}>배경 제거</EditTabButton>
+                            <EditTabButton active={editSubMode === 'resize'} onClick={() => handleEditSubModeChange('resize')} disabled={isLoading}>해상도 조절</EditTabButton>
+                            <EditTabButton active={editSubMode === 'colorize'} onClick={() => handleEditSubModeChange('colorize')} disabled={isLoading}>AI 채색</EditTabButton>
+                          </div>
+                        </div>
+                        
+                        {editSubMode === 'style-remix' && (
+                          <div className="animate-fade-in-fast space-y-4">
+                            <StyleSelector 
+                              styles={artStyleOptions}
+                              selectedStyle={editState.remixStyle}
+                              onSelect={(style) => setEditState(p => ({...p, remixStyle: style}))}
+                              disabled={isLoading}
+                            />
+                             <p className="text-center text-sm text-gray-400 p-3 bg-gray-900/50 rounded-lg">
+                                AI가 업로드된 이미지의 구성을 유지하면서 선택한 아티스트 스타일로 전체 이미지를 다시 그립니다.
+                            </p>
+                          </div>
+                        )}
+                        
+                        {editSubMode === 'resize' && (
+                          <div className="animate-fade-in-fast">
+                            <label className="block text-lg font-semibold mb-2 text-teal-300">조절 옵션</label>
+                            <div className="flex flex-wrap gap-2">
+                                <SettingButton onClick={() => setEditState(p=>({...p, resizeOption: '4x'}))} disabled={isLoading} active={editState.resizeOption === '4x'}>4배 향상</SettingButton>
+                                <SettingButton onClick={() => setEditState(p=>({...p, resizeOption: '2x'}))} disabled={isLoading} active={editState.resizeOption === '2x'}>2배 향상</SettingButton>
+                                <SettingButton onClick={() => setEditState(p=>({...p, resizeOption: 'hd'}))} disabled={isLoading} active={editState.resizeOption === 'hd'}>HD</SettingButton>
+                                <SettingButton onClick={() => setEditState(p=>({...p, resizeOption: '0.5x'}))} disabled={isLoading} active={editState.resizeOption === '0.5x'}>0.5배 축소</SettingButton>
+                                <SettingButton onClick={() => setEditState(p=>({...p, resizeOption: '0.25x'}))} disabled={isLoading} active={editState.resizeOption === '0.25x'}>0.25배 축소</SettingButton>
+                            </div>
+                            <p className="text-center text-sm text-gray-400 p-3 mt-4 bg-gray-900/50 rounded-lg">
+                              AI가 이미지의 크기를 조절하면서 디테일을 지능적으로 추가하거나 보존합니다.
+                            </p>
+                          </div>
+                        )}
+
+                        {(editSubMode === 'colorize' || editSubMode === 'remove-bg') && (
+                          <p className="text-center text-sm text-gray-400 p-3 bg-gray-900/50 rounded-lg animate-fade-in-fast">
+                            {
+                              {
+                                'remove-bg': 'AI가 이미지의 배경을 자동으로 제거합니다.',
+                                'colorize': '흑백 사진을 업로드하면 AI가 자연스러운 색상으로 채색합니다.'
+                              }[editSubMode]
+                            }
+                          </p>
+                        )}
+
+                        <button 
+                          onClick={handleExecuteEdit} 
+                          disabled={isEditExecuteDisabled} 
+                          className="w-full bg-indigo-600 text-white font-semibold py-3 rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                        >
+                          {editButtonTextMap[editSubMode]}
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </>
               )}
               {mode === 'composition' && (
@@ -535,8 +763,19 @@ const App: React.FC = () => {
                       maxFiles={12}
                     />
                   </div>
+                  <div>
+                    <label htmlFor="composition-prompt" className="block text-lg font-semibold mb-2 text-teal-300">연출 지시 <span className="text-sm text-gray-400 font-normal">(선택 사항)</span></label>
+                    <textarea 
+                      id="composition-prompt" 
+                      value={compositionPrompt} 
+                      onChange={(e) => setCompositionPrompt(e.target.value)} 
+                      placeholder="예: 고양이를 강아지 왼쪽에, 둘 다 풀밭 위에 있도록 배치해주세요." 
+                      className="w-full h-24 p-3 bg-gray-900 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition" 
+                      disabled={isLoading}
+                    />
+                  </div>
                   <button 
-                    onClick={handleCompose} 
+                    onClick={() => handleCompose(compositionPrompt)} 
                     disabled={isLoading || isCompositionDisabled}
                     className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-purple-600 to-indigo-500 text-white font-bold py-4 px-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed hover:from-purple-700 hover:to-indigo-600 shadow-lg hover:shadow-purple-500/50"
                   >
@@ -549,33 +788,62 @@ const App: React.FC = () => {
                 </>
               )}
               {mode === 'decomposition' && (
-                <>
-                  <div>
-                    <div className="mb-2">
-                      <LabeledSection title="이미지 분해하기" tooltip="분해할 이미지를 업로드하세요. AI가 이미지의 핵심 요소를 분리하고, 가려진 부분을 복원합니다." />
+                 <>
+                    <div className="grid grid-cols-3 gap-2">
+                        <SettingButton onClick={() => setDecompositionSubMode('layer')} active={decompositionSubMode === 'layer'}>레이어</SettingButton>
+                        <SettingButton onClick={() => setDecompositionSubMode('auto')} active={decompositionSubMode === 'auto'}>자동</SettingButton>
+                        <SettingButton onClick={() => setDecompositionSubMode('interactive')} active={decompositionSubMode === 'interactive'}>선택</SettingButton>
                     </div>
-                    <ImageInput 
-                      files={decompositionState.inputFile ? [decompositionState.inputFile] : []} 
-                      onFilesChange={(files) => setDecompositionInputFile(files[0] || null)} 
-                      isLoading={isLoading} 
-                      maxFiles={1}
-                      replace
-                    />
-                  </div>
-                  <button 
-                    onClick={handleDecompose} 
-                    disabled={isDecompositionDisabled}
-                    className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-purple-600 to-indigo-500 text-white font-bold py-4 px-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed hover:from-purple-700 hover:to-indigo-600 shadow-lg hover:shadow-purple-500/50"
-                  >
-                    <ExtractIcon className="w-6 h-6" />
-                    <span>이미지 분해 실행</span>
-                  </button>
+
+                    <div className="mt-4">
+                        <div className="mb-2">
+                        <LabeledSection title="분해할 이미지" tooltip="분해할 이미지를 업로드하세요." />
+                        </div>
+                        <ImageInput 
+                        files={decompositionState.inputFile ? [decompositionState.inputFile] : []} 
+                        onFilesChange={(files) => setDecompositionInputFile(files[0] || null)} 
+                        isLoading={isLoading} 
+                        maxFiles={1}
+                        replace
+                        />
+                    </div>
+
+                    {(decompositionSubMode === 'auto' || decompositionSubMode === 'layer') && (
+                        <>
+                            <div>
+                                <label htmlFor="decomposition-prompt" className="block text-lg font-semibold mb-2 text-teal-300">분해 지시 <span className="text-sm text-gray-400 font-normal">(선택 사항)</span></label>
+                                <textarea 
+                                id="decomposition-prompt" 
+                                value={decompositionPrompt} 
+                                onChange={(e) => setDecompositionPrompt(e.target.value)} 
+                                placeholder={decompositionSubMode === 'layer' ? "예: 소녀와 나무를 주요 레이어로 분리해줘." : "예: 사람만 분해해주세요."} 
+                                className="w-full h-24 p-3 bg-gray-900 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition" 
+                                disabled={isLoading}
+                                />
+                            </div>
+                            <button 
+                                onClick={() => decompositionSubMode === 'layer' ? handleLayerDecompose(decompositionPrompt) : handleDecompose(decompositionPrompt)} 
+                                disabled={isDecompositionDisabled}
+                                className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-purple-600 to-indigo-500 text-white font-bold py-4 px-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed hover:from-purple-700 hover:to-indigo-600 shadow-lg hover:shadow-purple-500/50"
+                            >
+                                <ExtractIcon className="w-6 h-6" />
+                                <span>{decompositionSubMode === 'layer' ? '레이어 분해 실행' : '자동 분해 실행'}</span>
+                            </button>
+                        </>
+                    )}
+                     {decompositionSubMode === 'interactive' && (
+                        <>
+                             <p className="text-center text-gray-400 p-4 bg-gray-900/50 rounded-lg">
+                                {decompositionState.inputFile ? '오른쪽 패널에서 이미지를 클릭하여 객체 추출을 시작하세요.' : '먼저 이미지를 업로드하세요.'}
+                            </p>
+                        </>
+                     )}
                 </>
               )}
               {mode === 'video' && (
                 <>
                     {!isVeoKeyReady && <VeoApiKeyBanner />}
-                    <div><label htmlFor="video-prompt" className="block text-lg font-semibold mb-2 text-teal-300">비디오 시나리오</label><div className="relative"><textarea id="video-prompt" value={videoState.prompt} onChange={(e) => setVideoState(p=>({...p, prompt: e.target.value}))} placeholder="예: 캐릭터가 배경 숲을 탐험합니다..." className="w-full h-36 p-3 bg-gray-900 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition" disabled={isLoading}/><button onClick={handleInspireMe} disabled={isLoading} title="영감 얻기" className="absolute bottom-3 right-3 text-gray-400 hover:text-purple-400 transition-colors disabled:opacity-50"><LightbulbIcon className="w-5 h-5" /></button></div></div>
+                    <div><label htmlFor="video-prompt" className="block text-lg font-semibold mb-2 text-teal-300">비디오 시나리오</label><div className="relative"><textarea id="video-prompt" value={videoState.prompt} onChange={(e) => setVideoState(p=>({...p, prompt: e.target.value}))} placeholder="예: 캐릭터가 배경 숲을 탐험합니다..." className="w-full h-36 p-3 bg-gray-900 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition" disabled={isLoading}/></div></div>
                     <div>
                         <div className="mb-2">
                           <LabeledSection title="참고 이미지" tooltip="비디오 생성에 사용할 이미지를 업로드하세요. (최대 3개)" />

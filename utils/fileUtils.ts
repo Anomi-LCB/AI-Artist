@@ -35,3 +35,21 @@ export const blobToBase64 = (blob: Blob): Promise<string> =>
     };
     reader.onerror = (error) => reject(error);
   });
+
+// FIX: Add missing fileToImage utility function.
+export const fileToImage = (file: File): Promise<HTMLImageElement> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = (error) => reject(error);
+      if (event.target?.result) {
+        img.src = event.target.result as string;
+      } else {
+        reject(new Error("Could not read file."));
+      }
+    };
+    reader.onerror = (error) => reject(error);
+    reader.readAsDataURL(file);
+  });

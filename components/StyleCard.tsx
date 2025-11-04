@@ -17,6 +17,7 @@ const styleVisuals: { [key in ArtStyleId]: string } = {
   '우키요에': 'from-red-400 via-cyan-300 to-amber-200',
   '아르누보': 'from-emerald-400 via-yellow-300 to-emerald-600',
   '사이버펑크 글리치': 'from-fuchsia-600 via-blue-500 to-cyan-400',
+  '카툰': 'from-yellow-400 via-orange-500 to-red-500',
 };
 
 export const StyleCard: React.FC<StyleCardProps> = ({ id, label, isSelected, onClick, disabled }) => {

@@ -1,4 +1,5 @@
 
+
 import React, { useEffect } from 'react';
 import { LightboxContent } from '../types';
 import { DownloadIcon } from './icons/DownloadIcon';
@@ -77,7 +78,7 @@ export const Lightbox: React.FC<LightboxProps> = ({ content, onClose, onSave, on
           />
         )}
       </div>
-      <div className="flex-shrink-0 mt-4 flex items-center gap-4" onClick={(e) => e.stopPropagation()}>
+      <div className="flex-shrink-0 mt-4 flex flex-col sm:flex-row items-center gap-4" onClick={(e) => e.stopPropagation()}>
           {content.type === 'decomposed' && (
              <button
                 onClick={handleUse}

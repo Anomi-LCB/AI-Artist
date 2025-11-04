@@ -39,6 +39,10 @@
         --safe-area-inset-bottom: env(safe-area-inset-bottom);
         --safe-area-inset-left: env(safe-area-inset-left);
       }
+      html {
+        -webkit-text-size-adjust: 100%; /* Prevent font scaling in landscape mode */
+        -webkit-tap-highlight-color: rgba(128, 90, 213, 0.2); /* Subtle tap highlight for all elements */
+      }
       body {
         font-family: 'Noto Sans KR', 'Poppins', sans-serif;
         background-color: var(--bg-primary);

@@ -51,7 +51,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
       aria-modal="true"
       role="dialog"
     >
-      <div className="bg-gray-800 rounded-2xl shadow-2xl p-8 w-full max-w-md border border-gray-700 m-4 flex flex-col max-h-[90vh]">
+      <div className="bg-gray-800 rounded-2xl shadow-2xl p-6 sm:p-8 w-full max-w-md border border-gray-700 m-4 flex flex-col max-h-[90vh]">
         <div className="flex justify-between items-center mb-6 flex-shrink-0">
           <h2 className="text-2xl font-bold text-teal-300">설정</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-white transition-colors" aria-label="닫기">

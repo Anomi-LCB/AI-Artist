@@ -22,6 +22,7 @@ export const artStyleOptions: ArtStyleOption[] = [
   { id: '우키요에', label: '우키요에' },
   { id: '아르누보', label: '아르누보' },
   { id: '사이버펑크 글리치', label: '사이버\n펑크' },
+  { id: '카툰', label: '카툰' },
 ];
 
 export const qualityOptions: QualityOption[] = [

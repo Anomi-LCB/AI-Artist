@@ -101,7 +101,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({ creations, onSelectForEdit
                   </div>
               )}
               
-              <div className="absolute inset-0 bg-black/70 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+              <div className="absolute inset-0 bg-black/70 flex items-center justify-center opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
                 <div className="flex items-center gap-2">
                    <ActionButton onClick={() => onSelectForEditing(creation)} title="수정하기" className="hover:bg-purple-600" disabled={creation.type === 'video'}>
                     <EditIcon className="w-5 h-5" />

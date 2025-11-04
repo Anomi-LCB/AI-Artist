@@ -1,7 +1,7 @@
 
 
 import { GoogleGenAI, Modality, GenerateContentResponse, Part, Type, VideoGenerationReferenceImage, VideoGenerationReferenceType } from "@google/genai";
-import { ArtStyleId, QualityId, ImageAspectRatio, AspectRatio, Resolution, DecomposedImageElement } from "../types";
+import { ArtStyleId, QualityId, ImageAspectRatio, AspectRatio, Resolution, DecomposedImageElement, ResizeOption, DecomposedLayer } from "../types";
 
 const ARTIST_STYLE_PROMPT = `
 You are an AI artist with a very specific, consistent, and recognizable signature art style.
@@ -42,7 +42,13 @@ You are to generate images that are instantly recognizable as your work. Adhere 
 `;
 
 const STYLE_PROMPTS: { [key in ArtStyleId]: string } = {
-  '클래식': '', // Base style is already defined in ARTIST_STYLE_PROMPT
+  '클래식': `
+**Style Variant: Classic (Default)**
+- **Aesthetic:** This is your signature style. It blends modern digital illustration with the charm of classic Disney (pre-2000s) and the heartfelt atmosphere of Studio Ghibli.
+- **Line Art:** Use clean, dark sepia (not black) lines with subtle weight variation.
+- **Coloring:** Apply a soft, textured coloring that resembles digital watercolor or colored pencil. Use soft-cel shading.
+- **Palette:** The color palette should be vibrant yet harmonious, warm, and inviting.
+- **Goal:** Create a clean, clear, and emotionally resonant image that is instantly recognizable as your work. Adhere to all core rules of your artistic identity, especially the use of sepia line art, soft texturing, and a Ghibli/Disney-inspired aesthetic.`,
   '모노크롬 잉크': `
 **Style Variant: Monochrome Ink**
 - **Color Palette:** Strictly black and white. Use shades of dark sepia, warm grays, and cream for backgrounds. No other colors are allowed.
@@ -62,7 +68,11 @@ const STYLE_PROMPTS: { [key in ArtStyleId]: string } = {
   '사이버펑크 글리치': `
 **Style Variant: Cyberpunk Glitch**
 - **Aesthetic:** Create the image in a cyberpunk glitch style. Use dark, futuristic backgrounds with vibrant neon lighting (especially pinks, blues, and purples).
-- **Technique:** Incorporate digital artifacts like pixelation, scan lines, chromatic aberration, and glitch effects. Characters might have cybernetic enhancements. The mood should be gritty, high-tech, and dystopian.`
+- **Technique:** Incorporate digital artifacts like pixelation, scan lines, chromatic aberration, and glitch effects. Characters might have cybernetic enhancements. The mood should be gritty, high-tech, and dystopian.`,
+  '카툰': `
+**Style Variant: Cartoon**
+- **Aesthetic:** A bright, bold, and clean cartoon style reminiscent of modern American animation. Use thick, confident black outlines.
+- **Technique:** Employ flat colors with minimal, hard-edged cel shading. The focus is on clarity and appeal. Characters should have exaggerated, expressive features. The mood should be fun, energetic, and playful.`
 };
 
 const QUALITY_PROMPTS: { [key in QualityId]: string } = {
@@ -71,13 +81,38 @@ const QUALITY_PROMPTS: { [key in QualityId]: string } = {
 };
 
 const DECOMPOSITION_ANALYSIS_PROMPT = `You are an expert image analyst. Your task is to identify all the distinct, primary objects or characters in the provided image.
+
+**Core Rules:**
 - List the names of these objects in a JSON array of strings.
 - Be concise and specific with the names (e.g., "Acoustic Guitar", "Grand Piano", "Red Drum Kit").
-- The names should be in Korean.
+- The names must be in Korean.
 - Do not list insignificant background elements.
 - If it's a single character, list their main body parts (e.g., "Head", "Torso", "Arms", "Legs").
+
+**User Guidance (Highest Priority):**
+- The user may provide a specific instruction. This instruction MUST be treated as a strict filter for your object selection.
+- For example, if the user says "only the person", you must identify and list ONLY the person's components, ignoring all other objects.
+- If the user says "exclude the background", you must identify and list everything that is NOT part of the distant background.
+
 Example output for an image with a cat and a dog: ["고양이", "개"]
 Example output for an image of a single person: ["머리", "상체", "팔", "다리"]
+`;
+
+const LAYER_DECOMPOSITION_ANALYSIS_PROMPT = `You are an expert image analyst specializing in scene deconstruction for professional graphic editors. Your task is to analyze an image and break it down into its primary, logical, and stackable layers, as if preparing it for a Photoshop project.
+
+**Core Rules:**
+1.  **Identify Logical Layers:** Analyze the image and identify the main constituent layers. Think in terms of foreground, midground, and background. Typical layers might include: "Main Character", "Secondary Character", "Foreground Object", "Midground Elements", "Background Landscape", "Sky".
+2.  **Naming Convention:** Layer names MUST be in Korean. They should be concise, descriptive, and intuitive (e.g., "나무", "소녀", "배경 산", "하늘").
+3.  **Output Format:** Your response MUST be a JSON object containing a single key, "layers", which is an array of strings.
+4.  **Layer Order:** The array should be ordered from the **top-most layer (foreground) to the bottom-most layer (background)**. This is critical.
+
+**User Guidance (Highest Priority):**
+- If the user provides a prompt, use it as a hint to better identify or name the layers. For example, if the prompt is "A girl reading under a tree", you should prioritize identifying "소녀" and "나무" as separate key layers.
+
+**Example Output for an image of a girl reading under a tree with mountains in the back:**
+{
+  "layers": ["소녀", "나무", "배경 산", "하늘"]
+}
 `;
 
 const DECOMPOSITION_EXTRACTION_PROMPT_TEMPLATE = (objectName: string) => `
@@ -87,9 +122,8 @@ You are an expert digital restoration artist, equivalent to a world-class Photos
 
 **Execution Protocol:**
 1.  **Flawless Isolation:** Your output MUST contain ONLY the specified "${objectName}". All other elements must be completely removed.
-2.  **Background:** The isolated object must be placed on a perfectly transparent background.
+2.  **Background & Format:** The isolated object MUST be placed on a perfectly transparent background. The final output file format MUST be a PNG that correctly utilizes an alpha channel for 100% transparency. Ensure the edges are clean with no haloing or background residue.
 3.  **Masterful Reconstruction (Top Priority):** You must meticulously reconstruct any and all parts of the "${objectName}" that are occluded, obscured, or cut off. This reconstruction must be undetectable. The restored areas must achieve a 99.99% fidelity match to the original's visible style, texture, lighting, and perspective. The final object must appear 100% complete and natural, as if it was photographed without any obstruction.
-4.  **Format:** Your final output is a single image file of the perfectly restored "${objectName}".
 `;
 
 const COMPOSITION_PROMPT = `You are an elite-level visual effects (VFX) compositor, a master of digital illusion with unparalleled skill in photorealistic integration. Your mission is to composite multiple objects from separate source images into a single, flawlessly coherent, and utterly believable scene, regardless of whether you are given two images or up to twelve. You must intelligently adapt to the number of inputs to create the best possible composition.
@@ -105,32 +139,107 @@ const COMPOSITION_PROMPT = `You are an elite-level visual effects (VFX) composit
 
 2.  **INTELLIGENT & CONTEXT-AWARE SCENE CONSTRUCTION:**
     *   **Deep Analysis:** Your first step is to perform a deep analysis of all provided objects. Understand not just *what* they are, but their potential relationships, relative scales, and implied actions.
-    *   **Dynamic Composition Strategy:** The number of input images will vary. Your strategy must adapt. For a few objects, the interaction might be direct and intimate. For many objects, you may need to create a wider scene, arranging them as a group or in a plausible environment where their co-existence makes sense.
-    *   **Optimal Arrangement:** Do not settle for the first logical arrangement. Your goal is to find the **most compelling, natural, and aesthetically pleasing** composition. The final scene should tell a clear and engaging story. For example:
+    *   **Optimal Arrangement:** Your goal is to find the **most compelling, natural, and aesthetically pleasing** composition. The final scene should tell a clear and engaging story. For example:
         *   **Inputs:** [Image of a person], [Image of a dog], [Image of a car].
-        *   **Optimal Output:** A dynamic shot of the person driving the car with the dog looking excitedly out the passenger window is often more compelling than a static shot of them standing beside the car. Choose the arrangement that maximizes visual interest and narrative clarity.
-        *   **Inputs:** [Image of a woman], [Image of a business suit], [Image of a laptop], [Image of a modern office chair].
-        *   **Optimal Output:** The woman, professionally dressed in the suit, actively engaged with her work on the laptop while seated in the chair, creating a complete narrative of a modern professional at work.
+        *   **Optimal Output:** A dynamic shot of the person driving the car with the dog looking excitedly out the passenger window is often more compelling than a static shot of them standing beside the car.
     *   Your creative judgment is key, but it must be guided by the principles of logic, realism, and strong visual storytelling.
 
 3.  **MASTERFUL ENVIRONMENTAL INTEGRATION:**
     *   While the source objects themselves are immutable, you MUST create a new, unifying environment for them.
     *   **Lighting & Shadows:** All objects must be re-lit to match a single, consistent light source within the new scene. This is crucial for realism. You must generate physically accurate shadows (cast shadows, contact shadows) for every object based on this new light source.
     *   **Perspective & Scale:** Ensure all objects are scaled correctly relative to each other and are placed on a consistent ground plane or environment. Their perspectives must align.
-    *   **Atmosphere & Color Grading:** Create a background and atmosphere (indoor, outdoor, day, night) that complements the objects. Apply a final color grade to the entire image to unify all elements and create a cinematic, photorealistic look.
+    *   **Atmosphere & Color Grading:** Create a background and atmosphere that complements the objects. Apply a final color grade to the entire image to unify all elements and create a cinematic, photorealistic look.
 
-4.  **OUTPUT REQUIREMENTS:**
-    *   The final output must be a single, high-resolution, photorealistic image.
-    *   The result should be so seamless that it's impossible to tell it was composited from multiple sources.
+**User's Specific Directive (Highest Priority):**
+- You may be given an additional text prompt from the user. This directive is your **ABSOLUTE HIGHEST PRIORITY** for arranging the scene.
+- If the user says "put the dog to the left of the car, on the grass", you MUST follow that instruction precisely, even if you think another arrangement is more creative. The user's text prompt is the final command.
+- If no specific prompt is given, you are to use your creative judgment as described in the mandates above to create the best possible scene.
 
-**Summary of your task:** Act as a world-class compositor. Take these exact objects. Do not change them. Intelligently analyze their relationships and the number of inputs to construct the most plausible and visually stunning scene possible. The realism of the integration is paramount.
+**Output Requirements:**
+- The final output must be a single, high-resolution, photorealistic image.
+- The result should be so seamless that it's impossible to tell it was composited from multiple sources.
 `;
+
+const INTERACTIVE_ANALYSIS_PROMPT = `You are an expert image analysis tool. The user has provided an image with a small, bright red circular marker. Your ONLY task is to identify the single, complete object or entity the marker is on.
+
+**CRITICAL:** The red marker is ONLY a guide. Do not mention it in your response.
+
+**Output Format:**
+Your response MUST be a JSON object with a single key: "name". The value must be a concise, descriptive name for the object in Korean.
+
+Example output:
+{
+  "name": "어쿠스티 기타"
+}
+`;
+
+const BACKGROUND_REMOVAL_PROMPT = `You are an expert image editor specializing in background removal. Your ONLY task is to identify the primary subject(s) in the image and completely remove the background.
+
+**CRITICAL REQUIREMENTS:**
+1. The final output MUST be a single image file in PNG format that properly uses an alpha channel.
+2. The background MUST be 100% perfectly transparent.
+3. The subject(s) must be perfectly cut out with clean edges, leaving no residual background pixels or "halo" effects.
+4. Do not alter the subject(s) themselves in any way (color, shape, etc.).
+`;
+const RESIZE_PROMPT_TEMPLATE = (option: ResizeOption) => {
+    let instruction = '';
+    switch (option) {
+        case '2x':
+            instruction = 'double its original resolution (2x upscale)';
+            break;
+        case '4x':
+            instruction = 'four times its original resolution (4x upscale)';
+            break;
+        case 'hd':
+            instruction = 'a standard HD resolution (1024 pixels on its longest side)';
+            break;
+        case '0.5x':
+            instruction = 'half its original resolution (0.5x downscale), intelligently preserving key details';
+            break;
+        case '0.25x':
+            instruction = 'a quarter of its original resolution (0.25x downscale), intelligently preserving key details';
+            break;
+    }
+
+    return `You are an expert in AI image restoration and intelligent resizing. Your task is to re-render the provided image to ${instruction}.
+
+**Core Rules:**
+1.  **Intelligent Upscaling/Downscaling:** This is not a simple resize. You must intelligently generate new details for upscaling or preserve critical details for downscaling, ensuring consistency with the original image's style and content.
+2.  **Detail & Sharpness:** Meticulously enhance details, sharpen edges without creating artifacts, and improve textures. When downscaling, consolidate details gracefully without losing the essence of the image.
+3.  **Fidelity:** Preserve the original artwork's character, composition, and color fidelity perfectly.
+4.  **Professional Grade:** The output must be a high-quality, professional-grade image, free of digital noise or compression artifacts.`;
+};
+const GENERATIVE_FILL_PROMPT_TEMPLATE = (prompt: string) => `You are a world-class digital artist and VFX expert specializing in photorealistic generative fill and inpainting. Your mission is to execute a user's text instruction to edit an image with absolute precision and undetectable realism.
+
+**PRIME DIRECTIVE: The user's instruction is the ultimate command and must be followed literally and precisely.**
+
+**Execution Protocol:**
+1.  **Literal Interpretation:** Analyze the user's instruction: "${prompt}". Execute this command exactly as written. Do not add, remove, or interpret beyond the specified request.
+2.  **Flawless Integration:** The modifications MUST be perfectly seamless. This includes:
+    *   **Physics-Accurate Lighting:** The new elements must adopt the exact lighting environment of the original image, including light direction, color temperature, and softness. Cast shadows must be physically correct in terms of direction, diffusion, and contact.
+    *   **Pixel-Perfect Textures:** Any generated textures must perfectly match the surrounding materials in grain, reflectivity, and detail.
+    *   **Consistent Perspective:** All added or modified elements must align flawlessly with the image's existing perspective grid.
+3.  **Total Preservation:** You are forbidden from altering any pixel of the image that is not directly required to fulfill the user's instruction. The integrity of the untouched areas is paramount.
+
+Your goal is a final image where the edit is so perfect it's impossible to tell any modification occurred.`;
+
+const COLORIZE_PROMPT = `You are a world-renowned digital restoration artist and historian, specializing in the art of photorealistic colorization. Your task is to colorize the provided black and white image with the highest degree of realism and contextual accuracy possible.
+
+**Core Mandates:**
+1.  **Deep Contextual Analysis:** Before applying any color, perform a deep analysis of the image content. Consider the era, the materials of clothing, the types of objects, and the likely time of day. Your color choices must reflect this analysis. For example, fabrics from the 1940s have different dyes and textures than modern ones.
+2.  **Physics-Based Coloring:** Apply color based on the principles of light and material science. Skin tones should have subtle variations (subsurface scattering), metals should have appropriate specular highlights, and fabrics should show texture in their color.
+3.  **Natural Palette:** Avoid overly saturated or cartoonish colors. Strive for a palette that is natural, authentic, and evocative of the scene's true atmosphere.
+4.  **Preserve Luminance:** Do not alter the original image's brightness, contrast, or shadow structure. Your job is to add color information only, perfectly mapping it to the existing tonal values.
+
+The final output must be a breathtakingly realistic, full-color photograph that looks as if it were originally shot in color.`;
 
 
 const getFriendlyBlockReason = (reason: string | undefined): string => {
     switch (reason) {
         case 'SAFETY':
             return '안전 설정에 의해 생성이 차단되었습니다. 더 안전한 프롬프트를 사용해 보세요.';
+        case 'NO_IMAGE':
+            return '모델이 이미지를 생성하지 않았습니다. 프롬프트를 더 명확하게 하거나 다른 이미지를 사용해 보세요.';
         case 'OTHER':
             return '알 수 없는 이유로 생성이 차단되었습니다. 프롬프트를 수정해 보세요.';
         default:
@@ -212,11 +321,6 @@ export const generateArt = async (
 
     const systemInstruction = ARTIST_STYLE_PROMPT + STYLE_PROMPTS[artStyle] + QUALITY_PROMPTS[quality];
 
-    let fullPrompt = prompt;
-    if (negativePrompt) {
-        fullPrompt += `\n\n[Negative Prompt]: ${negativePrompt}`;
-    }
-
     const parts: Part[] = [];
 
     baseImages.forEach(img => {
@@ -237,7 +341,35 @@ export const generateArt = async (
         });
     });
 
-    parts.push({ text: fullPrompt });
+    let textForModel = "";
+    const userInstruction = prompt.trim();
+
+    if (baseImages.length > 0) {
+      if (userInstruction) {
+        textForModel = `Task: You are given a base image. Your primary mission is to modify it according to the following user instruction, while strictly adhering to your signature '${artStyle}' style.
+User Instruction: "${userInstruction}"`;
+      } else {
+        textForModel = `Task: Re-imagine the provided image completely in your signature '${artStyle}' style. You must follow the composition of the original, but reinterpret every element through the lens of your unique artistic identity.`;
+      }
+    } else if (referenceImages.length > 0) {
+      textForModel = `CRITICAL TASK: Your absolute top priority is to maintain the identity, features, and style of the character(s) from the provided reference image(s). Place this EXACT character into a new scene based on the user's instruction below, rendered in your signature '${artStyle}' style. Do not change the character's appearance.
+User Instruction: "${userInstruction}"`;
+    } else {
+      textForModel = userInstruction;
+    }
+
+    if (negativePrompt.trim()) {
+      textForModel += `\n\n[Negative Prompt - Exclude these elements]: ${negativePrompt.trim()}`;
+    }
+
+    if (textForModel.trim()) {
+      parts.push({ text: textForModel });
+    }
+    
+    // UI should prevent this call without any content, but as a safeguard.
+    if (!parts.some(p => p.text?.trim() || p.inlineData)) {
+      throw new Error('프롬프트나 이미지를 제공해야 합니다.');
+    }
 
     try {
         setLoadingMessage('영감을 불어넣고 있습니다...');
@@ -248,8 +380,6 @@ export const generateArt = async (
             config: {
                 systemInstruction,
                 responseModalities: [Modality.IMAGE],
-                // The API does not have `numberOfImages` for this model, but we request multiple images via the UI.
-                // We will rely on the model to potentially return multiple images if the feature is supported implicitly. The UI handles multiple results.
             },
         });
         
@@ -264,18 +394,24 @@ export const generateArt = async (
 
 export const decomposeImage = async (
     baseImage: { mimeType: string; data: string },
+    prompt: string,
     setLoadingMessage: (message: string) => void
 ): Promise<DecomposedImageElement[]> => {
     // 1. Analysis Step
     setLoadingMessage('객체 식별 중...');
     let objectNames: string[] = [];
     try {
+        let analysisUserText = "Analyze this image and identify the primary objects according to the system instructions.";
+        if (prompt) {
+          analysisUserText = `Prioritize object identification based on this user directive: "${prompt}"`;
+        }
+
         const analysisResponse = await ai.models.generateContent({
             model: 'gemini-2.5-pro',
             contents: {
                 parts: [
                     { inlineData: { mimeType: baseImage.mimeType, data: baseImage.data } },
-                    { text: "Identify the objects in this image as per the system instructions." }
+                    { text: analysisUserText }
                 ]
             },
             config: {
@@ -341,6 +477,92 @@ export const decomposeImage = async (
     }
 
     return decomposedElements;
+};
+
+export const decomposeImageIntoLayers = async (
+    baseImage: { mimeType: string; data: string },
+    prompt: string,
+    setLoadingMessage: (message: string) => void
+): Promise<DecomposedLayer[]> => {
+    // 1. Layer Analysis Step
+    setLoadingMessage('레이어 구조 분석 중...');
+    let layerNames: string[] = [];
+    try {
+        const analysisResponse = await ai.models.generateContent({
+            model: 'gemini-2.5-pro',
+            contents: {
+                parts: [
+                    { inlineData: { mimeType: baseImage.mimeType, data: baseImage.data } },
+                    { text: prompt ? `User hint: "${prompt}"` : "" }
+                ]
+            },
+            config: {
+                systemInstruction: LAYER_DECOMPOSITION_ANALYSIS_PROMPT,
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        layers: {
+                            type: Type.ARRAY,
+                            items: { type: Type.STRING }
+                        }
+                    },
+                    required: ['layers']
+                }
+            }
+        });
+
+        const jsonText = analysisResponse.text.trim();
+        const result = JSON.parse(jsonText);
+        layerNames = result.layers;
+        
+        if (!Array.isArray(layerNames) || layerNames.length === 0) {
+            throw new Error("이미지에서 레이어를 식별하지 못했습니다.");
+        }
+    } catch (error: any) {
+        console.error("Error identifying layers for decomposition:", error);
+        throw new Error("레이어 분석 단계에서 오류가 발생했습니다.");
+    }
+    
+    // 2. Layer Extraction Step
+    const decomposedLayers: DecomposedLayer[] = [];
+    for (let i = 0; i < layerNames.length; i++) {
+        const name = layerNames[i];
+        setLoadingMessage(`${i + 1}/${layerNames.length}: '${name}' 레이어 추출 중...`);
+
+        try {
+            const extractionPrompt = DECOMPOSITION_EXTRACTION_PROMPT_TEMPLATE(name);
+            const responsePromise = ai.models.generateContent({
+                model: 'gemini-2.5-flash-image',
+                contents: { parts: [{ inlineData: baseImage }, { text: `Isolate the "${name}" from this image.` }] },
+                config: {
+                    systemInstruction: extractionPrompt,
+                    responseModalities: [Modality.IMAGE],
+                },
+            });
+            
+            const images = await handleGenerateContentResponse(responsePromise);
+            if (images.length > 0) {
+                decomposedLayers.push({
+                    id: Date.now() + i,
+                    name: name,
+                    base64: images[0],
+                    isVisible: true
+                });
+            } else {
+                 console.warn(`Could not extract layer '${name}'. The model did not return an image.`);
+            }
+        } catch (error: any) {
+            console.error(`Error decomposing layer '${name}':`, error);
+            // Don't stop the whole process, just skip this layer
+        }
+    }
+    
+    if (decomposedLayers.length === 0) {
+        throw new Error("모든 레이어를 추출하는 데 실패했습니다. 다른 이미지를 시도해 보세요.");
+    }
+
+    return decomposedLayers;
 };
 
 export const generateVideo = async (
@@ -456,6 +678,7 @@ export const generateVideo = async (
 
 export const composeImages = async (
   baseImages: { mimeType: string; data: string }[],
+  prompt: string,
   setLoadingMessage: (message: string) => void
 ): Promise<string[]> => {
   setLoadingMessage('이미지들을 분석하고 있습니다...');
@@ -466,7 +689,9 @@ export const composeImages = async (
       data: img.data,
     },
   }));
-  parts.push({ text: "Combine the provided images into a single, cohesive scene, following the system instructions precisely." });
+  
+  const userPrompt = prompt.trim() || "Task: The user has not provided a specific instruction. Your mission is to analyze all provided images and arrange them into the most logical and visually stunning single scene, following the system instructions precisely.";
+  parts.push({ text: userPrompt });
 
   try {
     setLoadingMessage('자연스러운 장면을 구성 중입니다...');
@@ -487,4 +712,205 @@ export const composeImages = async (
     console.error("Error composing images:", error);
     throw new Error(error.message || '이미지 합성 중 오류가 발생했습니다.');
   }
+};
+
+export const extractObjectAtPoint = async (
+    originalImage: { mimeType: string; data: string },
+    imageWithMarker: { mimeType: string; data: string },
+    setLoadingMessage: (message: string) => void
+): Promise<DecomposedImageElement> => {
+    // Step 1: Analyze the image with the marker to get the object's name
+    setLoadingMessage('선택한 객체 분석 중...');
+    let objectName = '';
+    try {
+        const analysisResponse = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: {
+                parts: [
+                    { inlineData: imageWithMarker },
+                    { text: "Identify the object at the red marker, following system instructions." }
+                ]
+            },
+            config: {
+                systemInstruction: INTERACTIVE_ANALYSIS_PROMPT,
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        name: { type: Type.STRING },
+                    },
+                    required: ['name']
+                }
+            }
+        });
+
+        const jsonText = analysisResponse.text.trim();
+        const result = JSON.parse(jsonText);
+        objectName = result.name;
+        if (!objectName || typeof objectName !== 'string' || objectName.trim() === '') {
+            throw new Error("API did not return a valid object name.");
+        }
+
+    } catch (error: any) {
+        console.error("Error identifying object at point:", error);
+        throw new Error("선택한 지점에서 객체 이름을 식별하는 데 실패했습니다. 다른 지점을 클릭해보세요.");
+    }
+
+    // Step 2: Extract the named object from the original image (without the marker)
+    setLoadingMessage(`'${objectName}' 추출 중...`);
+    try {
+        const extractionPrompt = DECOMPOSITION_EXTRACTION_PROMPT_TEMPLATE(objectName);
+        const parts: Part[] = [
+            { inlineData: originalImage },
+            { text: `Isolate the "${objectName}" from this image.` }
+        ];
+
+        const responsePromise = ai.models.generateContent({
+            model: 'gemini-2.5-flash-image',
+            contents: { parts },
+            config: {
+                systemInstruction: extractionPrompt,
+                responseModalities: [Modality.IMAGE],
+            },
+        });
+        
+        const images = await handleGenerateContentResponse(responsePromise);
+        if (images.length > 0) {
+            return {
+                name: objectName,
+                base64: images[0]
+            };
+        } else {
+             throw new Error(`모델이 '${objectName}'에 대한 이미지를 반환하지 않았습니다.`);
+        }
+
+    } catch (error: any) {
+        console.error(`Error extracting object '${objectName}':`, error);
+        throw new Error(`'${objectName}' 객체를 이미지에서 추출하는 데 실패했습니다.`);
+    }
+};
+
+export const removeBackground = async (
+  baseImage: { mimeType: string; data: string },
+  setLoadingMessage: (message: string) => void
+): Promise<string[]> => {
+    setLoadingMessage('배경을 제거하고 있습니다...');
+    try {
+        const responsePromise = ai.models.generateContent({
+            model: 'gemini-2.5-flash-image',
+            contents: { parts: [{ inlineData: baseImage }] },
+            config: {
+                systemInstruction: BACKGROUND_REMOVAL_PROMPT,
+                responseModalities: [Modality.IMAGE],
+            },
+        });
+        return await handleGenerateContentResponse(responsePromise);
+    } catch (error: any) {
+        console.error("Error removing background:", error);
+        throw new Error(error.message || '배경 제거 중 오류가 발생했습니다.');
+    }
+};
+
+export const resizeImage = async (
+  baseImage: { mimeType: string; data: string },
+  option: ResizeOption,
+  setLoadingMessage: (message: string) => void
+): Promise<string[]> => {
+    const message = {
+        '2x': '해상도를 2배로 높이고 있습니다...',
+        '4x': '해상도를 4배로 높이고 있습니다...',
+        'hd': 'HD 해상도로 변환 중입니다...',
+        '0.5x': '해상도를 0.5배로 줄이고 있습니다...',
+        '0.25x': '해상도를 0.25배로 줄이고 있습니다...',
+    }[option];
+    setLoadingMessage(message);
+
+    try {
+        const systemInstruction = RESIZE_PROMPT_TEMPLATE(option);
+        const responsePromise = ai.models.generateContent({
+            model: 'gemini-2.5-flash-image',
+            contents: { parts: [{ inlineData: baseImage }] },
+            config: {
+                systemInstruction,
+                responseModalities: [Modality.IMAGE],
+            },
+        });
+        return await handleGenerateContentResponse(responsePromise);
+    } catch (error: any) {
+        console.error(`Error resizing image with option ${option}:`, error);
+        throw new Error(error.message || '해상도 조절 중 오류가 발생했습니다.');
+    }
+};
+
+export const generativeFill = async (
+  baseImage: { mimeType: string; data: string },
+  prompt: string,
+  setLoadingMessage: (message: string) => void
+): Promise<string[]> => {
+    setLoadingMessage('이미지를 편집하고 있습니다...');
+    try {
+        const systemInstruction = GENERATIVE_FILL_PROMPT_TEMPLATE(prompt);
+        const responsePromise = ai.models.generateContent({
+            model: 'gemini-2.5-flash-image',
+            contents: { parts: [{ inlineData: baseImage }, { text: prompt }] },
+            config: {
+                systemInstruction,
+                responseModalities: [Modality.IMAGE],
+            },
+        });
+        return await handleGenerateContentResponse(responsePromise);
+    } catch (error: any) {
+        console.error("Error with generative fill:", error);
+        throw new Error(error.message || '이미지 편집 중 오류가 발생했습니다.');
+    }
+};
+
+export const remixImageStyle = async (
+  baseImage: { mimeType: string; data: string },
+  artStyle: ArtStyleId,
+  setLoadingMessage: (message: string) => void
+): Promise<string[]> => {
+    setLoadingMessage(`이미지를 '${artStyle}' 스타일로 리믹스하고 있습니다...`);
+    try {
+        const systemInstruction = ARTIST_STYLE_PROMPT + STYLE_PROMPTS[artStyle];
+        const userPrompt = `Task: Your task is to completely redraw the provided image, transforming it into your signature '${artStyle}' art style.
+**Crucial Rules:**
+1. **Preserve Everything:** You MUST faithfully preserve the original image's composition, scene, characters, objects, and their poses. Do not add, remove, or change the core elements.
+2. **Total Stylistic Transformation:** This is NOT a filter. Redraw the entire image from scratch using the line art, coloring, shading, and texture defined by your '${artStyle}' style in the system instructions.
+The final result should be the original scene, but as if you, the AI artist, painted it yourself.`;
+
+        const responsePromise = ai.models.generateContent({
+            model: 'gemini-2.5-flash-image',
+            contents: { parts: [{ inlineData: baseImage }, { text: userPrompt }] },
+            config: {
+                systemInstruction,
+                responseModalities: [Modality.IMAGE],
+            },
+        });
+        return await handleGenerateContentResponse(responsePromise);
+    } catch (error: any) {
+        console.error(`Error remixing image with style ${artStyle}:`, error);
+        throw new Error(error.message || '스타일 리믹스 중 오류가 발생했습니다.');
+    }
+};
+
+export const colorizeImage = async (
+  baseImage: { mimeType: string; data: string },
+  setLoadingMessage: (message: string) => void
+): Promise<string[]> => {
+    setLoadingMessage('이미지를 채색하고 있습니다...');
+    try {
+        const responsePromise = ai.models.generateContent({
+            model: 'gemini-2.5-flash-image',
+            contents: { parts: [{ inlineData: baseImage }] },
+            config: {
+                systemInstruction: COLORIZE_PROMPT,
+                responseModalities: [Modality.IMAGE],
+            },
+        });
+        return await handleGenerateContentResponse(responsePromise);
+    } catch (error: any) {
+        console.error("Error colorizing image:", error);
+        throw new Error(error.message || '이미지 채색 중 오류가 발생했습니다.');
+    }
 };
